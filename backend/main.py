@@ -11,9 +11,10 @@ import os
 import secrets
 
 from database import get_db, init_db
-from models import Log, Worker, LogTag, User, UserRole
+from models import Log, Worker, LogTag, User, UserRole, Session, AuditLog
+import json
 
-app = FastAPI(title="Logs Tracker", version="3.0.0")
+app = FastAPI(title="Logs Tracker", version="4.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,35 +26,77 @@ app.add_middleware(
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 
-# Простые токены сессий (в памяти)
-sessions = {}  # token -> user_id
-
-
 @app.on_event("startup")
 async def startup():
     await init_db()
 
 
-# ==================== AUTH ====================
+# ==================== XP & LEVELS ====================
+
+def calculate_level(xp: int) -> int:
+    """Рассчитать уровень по XP"""
+    # 100 XP = 1 уровень, потом +50 за каждый уровень
+    level = 1
+    required = 100
+    while xp >= required:
+        level += 1
+        xp -= required
+        required += 50
+    return level
+
+
+async def add_xp(db, worker_id: int, amount: int = 10):
+    """Добавить XP воркеру"""
+    result = await db.execute(select(Worker).where(Worker.id == worker_id))
+    worker = result.scalar_one_or_none()
+    if worker:
+        worker.xp = (worker.xp or 0) + amount
+        worker.level = calculate_level(worker.xp)
+        await db.commit()
+
+
+async def log_action(db, user_id: int, action: str, entity_type: str, entity_id: int, details: dict = None):
+    """Записать действие в журнал"""
+    audit = AuditLog(
+        user_id=user_id,
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        details=json.dumps(details, ensure_ascii=False) if details else None
+    )
+    db.add(audit)
+    await db.commit()
+
+
+# ==================== AUTH (Persistent Sessions) ====================
 
 def generate_token():
     return secrets.token_hex(32)
 
 
 async def get_current_user(authorization: Optional[str] = Header(None), db: AsyncSession = Depends(get_db)):
-    """Получить текущего пользователя по токену"""
+    """Получить текущего пользователя по токену (из БД)"""
     if not authorization:
         raise HTTPException(status_code=401, detail="Требуется авторизация")
     
     token = authorization.replace("Bearer ", "")
-    user_id = sessions.get(token)
     
-    if not user_id:
+    # Ищем сессию в БД
+    result = await db.execute(
+        select(Session).options(selectinload(Session.user)).where(Session.token == token)
+    )
+    session = result.scalar_one_or_none()
+    
+    if not session:
         raise HTTPException(status_code=401, detail="Недействительный токен")
     
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
+    # Проверяем срок действия
+    if session.expires_at and session.expires_at < datetime.now():
+        await db.delete(session)
+        await db.commit()
+        raise HTTPException(status_code=401, detail="Сессия истекла")
     
+    user = session.user
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="Пользователь не найден")
     
@@ -71,10 +114,11 @@ async def get_optional_user(authorization: Optional[str] = Header(None), db: Asy
 
 
 @app.post("/api/auth/login")
-async def login(data: dict, db: AsyncSession = Depends(get_db)):
-    """Вход в систему"""
+async def login(data: dict, user_agent: Optional[str] = Header(None), db: AsyncSession = Depends(get_db)):
+    """Вход в систему с сохранением сессии в БД"""
     username = data.get("username", "").strip().lower()
     password = data.get("password", "")
+    remember = data.get("remember", True)  # Запомнить устройство
     
     result = await db.execute(select(User).options(selectinload(User.worker)).where(User.username == username))
     user = result.scalar_one_or_none()
@@ -86,7 +130,17 @@ async def login(data: dict, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Аккаунт отключен")
     
     token = generate_token()
-    sessions[token] = user.id
+    
+    # Создаём сессию в БД
+    expires = None if remember else datetime.now() + timedelta(hours=24)
+    session = Session(
+        token=token,
+        user_id=user.id,
+        device_info=user_agent[:255] if user_agent else None,
+        expires_at=expires
+    )
+    db.add(session)
+    await db.commit()
     
     return {
         "token": token,
@@ -95,11 +149,15 @@ async def login(data: dict, db: AsyncSession = Depends(get_db)):
 
 
 @app.post("/api/auth/logout")
-async def logout(authorization: Optional[str] = Header(None)):
-    """Выход"""
+async def logout(authorization: Optional[str] = Header(None), db: AsyncSession = Depends(get_db)):
+    """Выход - удаляем сессию из БД"""
     if authorization:
         token = authorization.replace("Bearer ", "")
-        sessions.pop(token, None)
+        result = await db.execute(select(Session).where(Session.token == token))
+        session = result.scalar_one_or_none()
+        if session:
+            await db.delete(session)
+            await db.commit()
     return {"ok": True}
 
 
@@ -206,11 +264,18 @@ async def get_logs(
     worker_id: Optional[int] = None,
     tag: Optional[str] = None,
     search: Optional[str] = None,
+    date_filter: Optional[str] = None,  # today, week, month, all
+    date_from: Optional[str] = None,  # YYYY-MM-DD
+    date_to: Optional[str] = None,  # YYYY-MM-DD
+    archived: bool = False,  # Показать архивные
     limit: int = Query(100, le=1000),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     query = select(Log).options(selectinload(Log.worker))
+    
+    # Фильтр по архиву
+    query = query.where(Log.is_archived == archived)
     
     # Воркер видит только свои логи
     if user.role == UserRole.WORKER and user.worker_id:
@@ -226,6 +291,31 @@ async def get_logs(
             Log.owner.ilike(f"%{search}%"),
             Log.comment.ilike(f"%{search}%")
         ))
+    
+    # Фильтры по датам
+    today = datetime.now().date()
+    if date_filter == "today":
+        query = query.where(func.date(Log.created_at) == today)
+    elif date_filter == "week":
+        week_ago = today - timedelta(days=7)
+        query = query.where(func.date(Log.created_at) >= week_ago)
+    elif date_filter == "month":
+        month_ago = today - timedelta(days=30)
+        query = query.where(func.date(Log.created_at) >= month_ago)
+    
+    # Кастомный диапазон дат
+    if date_from:
+        try:
+            from_date = datetime.strptime(date_from, "%Y-%m-%d").date()
+            query = query.where(func.date(Log.created_at) >= from_date)
+        except:
+            pass
+    if date_to:
+        try:
+            to_date = datetime.strptime(date_to, "%Y-%m-%d").date()
+            query = query.where(func.date(Log.created_at) <= to_date)
+        except:
+            pass
     
     query = query.order_by(Log.created_at.desc()).limit(limit)
     result = await db.execute(query)
@@ -260,6 +350,7 @@ async def create_log(data: dict, user: User = Depends(get_current_user), db: Asy
         worker_id=worker_id,
         log_number=data["log_number"],
         balance=data.get("balance", "0"),
+        profit=data.get("profit"),
         owner=data.get("owner"),
         install_date=data["install_date"],
         check_date=data.get("check_date"),
@@ -268,6 +359,12 @@ async def create_log(data: dict, user: User = Depends(get_current_user), db: Asy
     )
     db.add(log)
     await db.commit()
+    
+    # Добавляем XP воркеру
+    await add_xp(db, worker_id, 10)
+    
+    # Записываем в журнал
+    await log_action(db, user.id, "create", "log", log.id, {"log_number": data["log_number"]})
     
     result = await db.execute(select(Log).options(selectinload(Log.worker)).where(Log.id == log.id))
     return result.scalar_one().to_dict()
@@ -284,7 +381,7 @@ async def update_log(log_id: int, data: dict, user: User = Depends(get_current_u
     if user.role == UserRole.WORKER and user.worker_id != log.worker_id:
         raise HTTPException(status_code=403, detail="Доступ запрещен")
     
-    for key in ["log_number", "balance", "owner", "install_date", "check_date", "tag", "comment"]:
+    for key in ["log_number", "balance", "profit", "owner", "install_date", "check_date", "tag", "comment"]:
         if key in data:
             setattr(log, key, data[key])
     
@@ -292,6 +389,104 @@ async def update_log(log_id: int, data: dict, user: User = Depends(get_current_u
     
     result = await db.execute(select(Log).options(selectinload(Log.worker)).where(Log.id == log_id))
     return result.scalar_one().to_dict()
+
+
+# ==================== ARCHIVE ====================
+
+@app.post("/api/logs/{log_id}/archive")
+async def archive_log(log_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Архивировать лог"""
+    result = await db.execute(select(Log).where(Log.id == log_id))
+    log = result.scalar_one_or_none()
+    if not log:
+        raise HTTPException(status_code=404, detail="Лог не найден")
+    
+    if user.role == UserRole.WORKER and user.worker_id != log.worker_id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    
+    log.is_archived = True
+    await db.commit()
+    return {"ok": True, "message": "Лог архивирован"}
+
+
+@app.post("/api/logs/{log_id}/unarchive")
+async def unarchive_log(log_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Восстановить из архива"""
+    result = await db.execute(select(Log).where(Log.id == log_id))
+    log = result.scalar_one_or_none()
+    if not log:
+        raise HTTPException(status_code=404, detail="Лог не найден")
+    
+    if user.role == UserRole.WORKER and user.worker_id != log.worker_id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    
+    log.is_archived = False
+    await db.commit()
+    return {"ok": True, "message": "Лог восстановлен"}
+
+
+# ==================== BULK ACTIONS ====================
+
+@app.post("/api/logs/bulk/delete")
+async def bulk_delete_logs(data: dict, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Массовое удаление логов"""
+    ids = data.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="Не указаны ID")
+    
+    for log_id in ids:
+        result = await db.execute(select(Log).where(Log.id == log_id))
+        log = result.scalar_one_or_none()
+        if log:
+            if user.role == UserRole.WORKER and user.worker_id != log.worker_id:
+                continue
+            await db.delete(log)
+    
+    await db.commit()
+    return {"ok": True, "deleted": len(ids)}
+
+
+@app.post("/api/logs/bulk/archive")
+async def bulk_archive_logs(data: dict, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Массовая архивация логов"""
+    ids = data.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="Не указаны ID")
+    
+    count = 0
+    for log_id in ids:
+        result = await db.execute(select(Log).where(Log.id == log_id))
+        log = result.scalar_one_or_none()
+        if log:
+            if user.role == UserRole.WORKER and user.worker_id != log.worker_id:
+                continue
+            log.is_archived = True
+            count += 1
+    
+    await db.commit()
+    return {"ok": True, "archived": count}
+
+
+@app.post("/api/logs/bulk/tag")
+async def bulk_change_tag(data: dict, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Массовое изменение тега"""
+    ids = data.get("ids", [])
+    tag = data.get("tag")
+    if not ids or not tag:
+        raise HTTPException(status_code=400, detail="Не указаны ID или тег")
+    
+    count = 0
+    for log_id in ids:
+        result = await db.execute(select(Log).where(Log.id == log_id))
+        log = result.scalar_one_or_none()
+        if log:
+            if user.role == UserRole.WORKER and user.worker_id != log.worker_id:
+                continue
+            log.tag = tag
+            count += 1
+    
+    await db.commit()
+    return {"ok": True, "updated": count}
 
 
 @app.delete("/api/logs/{log_id}")
@@ -380,21 +575,30 @@ async def get_stats(user: User = Depends(get_current_user), db: AsyncSession = D
         
         today = datetime.now().date()
         week_start = today - timedelta(days=today.weekday())  # Понедельник
+        month_start = today.replace(day=1)
         
         for w in workers:
-            # Логи за сегодня
-            today_logs = sum(1 for log in w.logs if log.created_at and log.created_at.date() == today)
+            # Логи за сегодня (не архивные)
+            active_logs = [log for log in w.logs if not log.is_archived]
+            today_logs = sum(1 for log in active_logs if log.created_at and log.created_at.date() == today)
             # Логи за неделю
-            week_logs = sum(1 for log in w.logs if log.created_at and log.created_at.date() >= week_start)
+            week_logs = sum(1 for log in active_logs if log.created_at and log.created_at.date() >= week_start)
+            # Логи за месяц
+            month_logs = sum(1 for log in active_logs if log.created_at and log.created_at.date() >= month_start)
             
             workers_stats.append({
                 "id": w.id,
                 "name": w.name,
-                "total": len(w.logs),
+                "total": len(active_logs),
                 "today": today_logs,
                 "week": week_logs,
-                "plan": 3,  # Дневной план
-                "plan_done": min(today_logs, 3)
+                "month": month_logs,
+                "daily_goal": w.daily_goal or 3,
+                "weekly_goal": w.weekly_goal or 15,
+                "monthly_goal": w.monthly_goal or 60,
+                "xp": w.xp or 0,
+                "level": w.level or 1,
+                "plan_done": min(today_logs, w.daily_goal or 3)
             })
     
     # Проверки сегодня/завтра
@@ -426,14 +630,75 @@ async def get_stats(user: User = Depends(get_current_user), db: AsyncSession = D
         count = (await db.execute(day_query)).scalar() or 0
         daily_stats.append(count)
     
+    # Подсчёт профита
+    profit_query = select(Log).where(Log.profit.isnot(None))
+    if user.role == UserRole.WORKER and user.worker_id:
+        profit_query = profit_query.where(Log.worker_id == user.worker_id)
+    
+    profit_result = await db.execute(profit_query)
+    total_profit = 0
+    for log in profit_result.scalars().all():
+        if log.profit:
+            # Парсим профит (50к -> 50, 1.5кк -> 1500)
+            try:
+                p = log.profit.lower().replace(" ", "")
+                if "кк" in p:
+                    total_profit += float(p.replace("кк", "")) * 1000
+                elif "к" in p:
+                    total_profit += float(p.replace("к", ""))
+                else:
+                    total_profit += float(p)
+            except:
+                pass
+    
+    # Форматируем профит
+    if total_profit >= 1000:
+        total_profit_str = f"{total_profit/1000:.1f}кк"
+    elif total_profit > 0:
+        total_profit_str = f"{total_profit:.0f}к"
+    else:
+        total_profit_str = "0"
+    
+    # Тренды - сравнение с прошлой неделей
+    today = datetime.now().date()
+    this_week_start = today - timedelta(days=today.weekday())
+    last_week_start = this_week_start - timedelta(days=7)
+    last_week_end = this_week_start - timedelta(days=1)
+    
+    this_week_query = select(func.count(Log.id)).where(
+        func.date(Log.created_at) >= this_week_start,
+        Log.is_archived == False
+    )
+    last_week_query = select(func.count(Log.id)).where(
+        func.date(Log.created_at) >= last_week_start,
+        func.date(Log.created_at) <= last_week_end,
+        Log.is_archived == False
+    )
+    
+    if user.role == UserRole.WORKER and user.worker_id:
+        this_week_query = this_week_query.where(Log.worker_id == user.worker_id)
+        last_week_query = last_week_query.where(Log.worker_id == user.worker_id)
+    
+    this_week_count = (await db.execute(this_week_query)).scalar() or 0
+    last_week_count = (await db.execute(last_week_query)).scalar() or 0
+    
+    if last_week_count > 0:
+        trend_percent = round(((this_week_count - last_week_count) / last_week_count) * 100)
+    else:
+        trend_percent = 100 if this_week_count > 0 else 0
+    
     return {
         "total_logs": total_logs,
         "total_workers": total_workers if user.role == UserRole.ADMIN else 1,
         "total_balance": "—",
+        "total_profit": total_profit_str,
         "by_tag": by_tag,
         "workers_stats": workers_stats,
         "today_checks": today_checks,
-        "daily_stats": daily_stats
+        "daily_stats": daily_stats,
+        "this_week": this_week_count,
+        "last_week": last_week_count,
+        "trend_percent": trend_percent
     }
 
 
@@ -446,6 +711,27 @@ async def get_users(user: User = Depends(get_current_user), db: AsyncSession = D
     
     result = await db.execute(select(User).options(selectinload(User.worker)))
     return [u.to_dict() for u in result.scalars().all()]
+
+
+# ==================== AUDIT LOG ====================
+
+@app.get("/api/audit")
+async def get_audit_log(
+    limit: int = Query(50, le=500),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Получить журнал изменений (только админ)"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    result = await db.execute(
+        select(AuditLog)
+        .options(selectinload(AuditLog.user))
+        .order_by(AuditLog.created_at.desc())
+        .limit(limit)
+    )
+    return [a.to_dict() for a in result.scalars().all()]
 
 
 # ==================== ADMIN ACTIONS ====================
@@ -467,6 +753,84 @@ async def reset_stats(user: User = Depends(get_current_user), db: AsyncSession =
     await db.commit()
     
     return {"message": "Статистика сброшена! Логи сохранены.", "ok": True}
+
+
+@app.post("/api/admin/import-csv")
+async def import_csv(data: dict, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Импорт логов из CSV (JSON формат)"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    rows = data.get("rows", [])
+    if not rows:
+        raise HTTPException(status_code=400, detail="Нет данных")
+    
+    imported = 0
+    errors = []
+    
+    for i, row in enumerate(rows):
+        try:
+            # Ищем воркера по имени
+            worker_name = row.get("worker", "").strip()
+            worker = None
+            if worker_name:
+                result = await db.execute(select(Worker).where(Worker.name.ilike(f"%{worker_name}%")))
+                worker = result.scalar_one_or_none()
+            
+            if not worker:
+                # Создаём нового воркера
+                worker = Worker(name=worker_name or f"Worker {i+1}")
+                db.add(worker)
+                await db.commit()
+                await db.refresh(worker)
+            
+            log = Log(
+                worker_id=worker.id,
+                log_number=row.get("log_number", str(i+1)),
+                balance=row.get("balance", "0"),
+                profit=row.get("profit"),
+                owner=row.get("owner"),
+                install_date=row.get("install_date", "—"),
+                check_date=row.get("check_date"),
+                tag=row.get("tag", "medium"),
+                comment=row.get("comment")
+            )
+            db.add(log)
+            imported += 1
+        except Exception as e:
+            errors.append(f"Строка {i+1}: {str(e)}")
+    
+    await db.commit()
+    
+    return {
+        "ok": True,
+        "imported": imported,
+        "errors": errors[:10]  # Первые 10 ошибок
+    }
+
+
+@app.get("/api/admin/export-csv")
+async def export_csv(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Экспорт всех логов в JSON (для CSV)"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    result = await db.execute(select(Log).options(selectinload(Log.worker)))
+    logs = result.scalars().all()
+    
+    return [{
+        "id": l.id,
+        "worker": l.worker.name if l.worker else "",
+        "log_number": l.log_number,
+        "balance": l.balance,
+        "profit": l.profit or "",
+        "owner": l.owner or "",
+        "install_date": l.install_date,
+        "check_date": l.check_date or "",
+        "tag": l.tag.value if hasattr(l.tag, 'value') else l.tag,
+        "comment": l.comment or "",
+        "created_at": l.created_at.isoformat() if l.created_at else ""
+    } for l in logs]
 
 
 @app.delete("/api/admin/delete-all-logs")
@@ -549,6 +913,7 @@ async def bot_create_log(data: dict, db: AsyncSession = Depends(get_db)):
         worker_id=worker_id,
         log_number=data["log_number"],
         balance=data.get("balance", "0"),
+        profit=data.get("profit"),
         owner=data.get("owner"),
         install_date=data["install_date"],
         check_date=check_date,

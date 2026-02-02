@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#8b5cf6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Logs Tracker</title>
+    <link rel="manifest" href="/manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -11,6 +15,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
+    <!-- Theme Toggle -->
+    <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()">🌙</button>
+    
     <!-- Animated Background -->
     <div class="animated-bg">
         <div class="orb orb-1"></div>
@@ -77,7 +84,8 @@
             <div class="sidebar-footer">
                 <div class="user-info" id="userInfo"></div>
                 <button class="btn btn-sm btn-secondary" id="resetStatsBtn" onclick="resetStats()" style="width:100%;margin-top:10px;display:none">🔄 Сбросить статистику</button>
-                <button class="btn btn-sm btn-secondary" onclick="logout()" style="width:100%;margin-top:10px">Выйти</button>
+                <button class="btn btn-sm btn-secondary" id="importBtn" onclick="openImportModal()" style="width:100%;margin-top:8px;display:none">📥 Импорт CSV</button>
+                <button class="btn btn-sm btn-secondary" onclick="logout()" style="width:100%;margin-top:8px">Выйти</button>
             </div>
         </aside>
 
@@ -117,6 +125,20 @@
                             <div class="stat-info">
                                 <span class="stat-value" id="statTodayChecks">0</span>
                                 <span class="stat-label">Проверок сегодня</span>
+                            </div>
+                        </div>
+                        <div class="stat-card stat-profit">
+                            <span class="stat-icon">💵</span>
+                            <div class="stat-info">
+                                <span class="stat-value" id="statTotalProfit">0</span>
+                                <span class="stat-label">Общий профит</span>
+                            </div>
+                        </div>
+                        <div class="stat-card stat-trend" id="statTrendCard">
+                            <span class="stat-icon">📈</span>
+                            <div class="stat-info">
+                                <span class="stat-value" id="statTrend">0%</span>
+                                <span class="stat-label">Тренд недели</span>
                             </div>
                         </div>
                     </div>
@@ -171,21 +193,41 @@
                             <option value="medium">📊 Средний</option>
                             <option value="salary">💰 Есть ЗП</option>
                         </select>
+                        <select id="filterDate">
+                            <option value="">Все даты</option>
+                            <option value="today">Сегодня</option>
+                            <option value="week">За неделю</option>
+                            <option value="month">За месяц</option>
+                        </select>
+                        <select id="filterArchive">
+                            <option value="false">Активные</option>
+                            <option value="true">Архив</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Bulk Actions -->
+                    <div class="bulk-actions" id="bulkActions" style="display:none">
+                        <span id="selectedCount">0 выбрано</span>
+                        <button class="btn btn-sm btn-secondary" onclick="bulkChangeTag()">🏷 Тег</button>
+                        <button class="btn btn-sm btn-secondary" onclick="bulkArchive()">📦 Архив</button>
+                        <button class="btn btn-sm btn-danger" onclick="bulkDelete()">🗑️ Удалить</button>
+                        <button class="btn btn-sm btn-secondary" onclick="clearSelection()">✖ Отмена</button>
                     </div>
 
                     <div class="table-container">
                         <table class="logs-table">
                             <thead>
                                 <tr>
+                                    <th><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
                                     <th>#</th>
                                     <th id="thWorker">Воркер</th>
                                     <th>№ Лога</th>
                                     <th>Баланс</th>
+                                    <th>Профит</th>
                                     <th>Владелец</th>
                                     <th>Установка</th>
                                     <th>Проверка</th>
                                     <th>Тег</th>
-                                    <th>Комментарий</th>
                                     <th>Действия</th>
                                 </tr>
                             </thead>
@@ -241,9 +283,14 @@
                         <input type="text" id="logBalance" placeholder="400к">
                     </div>
                     <div class="form-group">
-                        <label>Принадлежащий</label>
-                        <input type="text" id="logOwner" placeholder="@username или имя">
+                        <label>Профит 💵</label>
+                        <input type="text" id="logProfit" placeholder="50к">
                     </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Принадлежащий</label>
+                    <input type="text" id="logOwner" placeholder="@username или имя">
                 </div>
                 
                 <div class="form-group">
@@ -316,6 +363,38 @@
                     <button type="submit" class="btn btn-primary">Сохранить</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Import Modal -->
+    <div class="modal-overlay" id="importModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>📥 Импорт данных</h2>
+                <button class="modal-close" onclick="closeImportModal()">×</button>
+            </div>
+            <div class="import-content">
+                <p class="import-hint">Загрузите CSV файл или вставьте данные в формате JSON</p>
+                
+                <div class="form-group">
+                    <label>CSV файл</label>
+                    <input type="file" id="importFile" accept=".csv,.json" onchange="handleImportFile(event)">
+                </div>
+                
+                <div class="import-or">или</div>
+                
+                <div class="form-group">
+                    <label>JSON данные</label>
+                    <textarea id="importData" rows="8" placeholder='[{"worker":"Воркер1","log_number":"123","balance":"100к"}]'></textarea>
+                </div>
+                
+                <div class="import-preview" id="importPreview"></div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeImportModal()">Отмена</button>
+                    <button type="button" class="btn btn-primary" onclick="doImport()">Импортировать</button>
+                </div>
+            </div>
         </div>
     </div>
 

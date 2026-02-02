@@ -65,6 +65,11 @@ class Worker(Base):
     name = Column(String(255), nullable=False)
     telegram_id = Column(String(50), nullable=True)
     notes = Column(Text, nullable=True)
+    daily_goal = Column(Integer, default=3)  # Дневной план
+    weekly_goal = Column(Integer, default=15)  # Недельный план
+    monthly_goal = Column(Integer, default=60)  # Месячный план
+    xp = Column(Integer, default=0)  # Опыт
+    level = Column(Integer, default=1)  # Уровень
     created_at = Column(DateTime, default=func.now())
 
     logs = relationship("Log", back_populates="worker", cascade="all, delete-orphan")
@@ -76,8 +81,54 @@ class Worker(Base):
             "name": self.name,
             "telegram_id": self.telegram_id,
             "notes": self.notes,
+            "daily_goal": self.daily_goal,
+            "weekly_goal": self.weekly_goal,
+            "monthly_goal": self.monthly_goal,
+            "xp": self.xp,
+            "level": self.level,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "logs_count": len(self.logs) if self.logs else 0
+        }
+
+
+class Session(Base):
+    """Сессия пользователя (для persistent login)"""
+    __tablename__ = "sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String(100), unique=True, nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    device_info = Column(String(255), nullable=True)  # User-Agent
+    created_at = Column(DateTime, default=func.now())
+    expires_at = Column(DateTime, nullable=True)  # None = never expires
+
+    user = relationship("User")
+
+
+class AuditLog(Base):
+    """Журнал изменений"""
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    action = Column(String(50), nullable=False)  # create, update, delete
+    entity_type = Column(String(50), nullable=False)  # log, worker
+    entity_id = Column(Integer, nullable=True)
+    details = Column(Text, nullable=True)  # JSON с изменениями
+    created_at = Column(DateTime, default=func.now())
+
+    user = relationship("User")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "user_name": self.user.username if self.user else None,
+            "action": self.action,
+            "entity_type": self.entity_type,
+            "entity_id": self.entity_id,
+            "details": self.details,
+            "created_at": self.created_at.isoformat() if self.created_at else None
         }
 
 
@@ -92,11 +143,13 @@ class Log(Base):
     log_number = Column(String(50), nullable=False)
     pin = Column(String(100), nullable=True)  # Deprecated, kept for compatibility
     balance = Column(String(50), default="0")
+    profit = Column(String(50), nullable=True)  # Профит/прибыль
     owner = Column(String(100), nullable=True)  # Принадлежащий (текстовый тег)
     comment = Column(Text, nullable=True)
     install_date = Column(String(20), nullable=False)
     check_date = Column(String(20), nullable=True)
     tag = Column(SQLEnum(LogTag), default=LogTag.MEDIUM)
+    is_archived = Column(Boolean, default=False)  # Для архива
 
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
@@ -115,11 +168,13 @@ class Log(Base):
             "log_number": self.log_number,
             "pin": self.pin,
             "balance": self.balance,
+            "profit": self.profit,
             "owner": self.owner,
             "comment": self.comment,
             "install_date": self.install_date,
             "check_date": self.check_date,
             "tag": tag_value,
+            "is_archived": self.is_archived,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

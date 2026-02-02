@@ -14,6 +14,7 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8286352882:AAFuO-HqBFrnA4gui9EUXsq2GTq6uyAS14U")
 API_URL = os.getenv("API_URL", "http://localhost:8000")
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # Telegram ID админа для уведомлений
 
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
@@ -28,6 +29,7 @@ class States(StatesGroup):
     waiting_key = State()
     entering_log_number = State()
     entering_balance = State()
+    entering_profit = State()
     entering_owner = State()
     entering_install_date = State()
     entering_check_date = State()
@@ -217,6 +219,20 @@ async def enter_log_number(msg: types.Message, state: FSMContext):
 @dp.message(States.entering_balance)
 async def enter_balance(msg: types.Message, state: FSMContext):
     await state.update_data(balance=msg.text)
+    await state.set_state(States.entering_profit)
+    await msg.answer("💵 *Профит* (50к, 100к):", reply_markup=skip_kb(), parse_mode="Markdown")
+
+
+@dp.callback_query(F.data == "skip", States.entering_profit)
+async def skip_profit(cb: types.CallbackQuery, state: FSMContext):
+    await state.update_data(profit=None)
+    await state.set_state(States.entering_owner)
+    await cb.message.edit_text("👤 *Принадлежащий* (тег владельца):", reply_markup=skip_kb(), parse_mode="Markdown")
+
+
+@dp.message(States.entering_profit)
+async def enter_profit(msg: types.Message, state: FSMContext):
+    await state.update_data(profit=msg.text)
     await state.set_state(States.entering_owner)
     await msg.answer("👤 *Принадлежащий* (тег владельца):", reply_markup=skip_kb(), parse_mode="Markdown")
 
@@ -314,6 +330,24 @@ async def worker_selected(cb: types.CallbackQuery, state: FSMContext):
     await save_log_final(cb.message, state, data)
 
 
+async def notify_admin_new_log(log_data, worker_name, creator_name):
+    """Уведомление админа о новом логе"""
+    if not ADMIN_CHAT_ID:
+        return
+    
+    try:
+        tag = TAG_LABELS.get(log_data.get("tag"), log_data.get("tag"))
+        txt = (f"📥 *Новый лог!*\n\n"
+               f"👤 Создал: {creator_name}\n"
+               f"📌 Воркер: {worker_name}\n"
+               f"🔢 №{log_data.get('log_number')}\n"
+               f"💰 {log_data.get('balance')}\n"
+               f"🏷 {tag}")
+        await bot.send_message(int(ADMIN_CHAT_ID), txt, parse_mode="Markdown")
+    except Exception as e:
+        logging.error(f"Ошибка уведомления админа: {e}")
+
+
 async def save_log_final(msg, state, data):
     """Финальное сохранение лога после выбора воркера"""
     
@@ -330,16 +364,22 @@ async def save_log_final(msg, state, data):
         # Имя воркера из ответа API
         worker_name = r.get("worker", {}).get("name", "???") if isinstance(r, dict) else "???"
         owner_text = f"@{data.get('owner')}" if data.get('owner') else "—"
+        profit_text = f"+{data.get('profit')}" if data.get('profit') else "—"
         txt = (f"✅ *Лог добавлен!*\n\n"
                f"👤 Воркер: {worker_name}\n"
                f"🔢 №{data.get('log_number')}\n"
                f"💰 {data.get('balance')}\n"
+               f"💵 Профит: {profit_text}\n"
                f"🏠 Владелец: {owner_text}\n"
                f"📅 Уст: {data.get('install_date')}\n"
                f"🔔 Пров: {data.get('check_date') or '—'}\n"
                f"🏷 {tag}\n"
                f"💬 {data.get('comment') or '—'}")
         await msg.edit_text(txt, parse_mode="Markdown")
+        
+        # Уведомляем админа
+        creator_name = msg.chat.first_name or msg.chat.username or "Unknown"
+        await notify_admin_new_log(data, worker_name, creator_name)
     else:
         await msg.edit_text("❌ Ошибка при сохранении")
     

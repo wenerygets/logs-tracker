@@ -7,6 +7,29 @@ let authToken = localStorage.getItem('token');
 let logsChart = null;
 let tagsChart = null;
 
+// Selection for bulk actions
+let selectedLogs = new Set();
+
+// ============ THEME ============
+
+function toggleTheme() {
+    const body = document.body;
+    const btn = document.getElementById('themeToggle');
+    body.classList.toggle('light-theme');
+    const isLight = body.classList.contains('light-theme');
+    btn.textContent = isLight ? '☀️' : '🌙';
+    localStorage.setItem('theme', isLight ? 'light' : 'dark');
+}
+
+function initTheme() {
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'light') {
+        document.body.classList.add('light-theme');
+        const btn = document.getElementById('themeToggle');
+        if (btn) btn.textContent = '☀️';
+    }
+}
+
 const TAG_LABELS = {
     fat: '🔥 Жир',
     poor: '💸 Нищий',
@@ -130,10 +153,14 @@ function showApp() {
     // Update mobile UI
     updateMobileUI();
     
-    // Show reset stats button for admin
+    // Show admin buttons
     const resetStatsBtn = document.getElementById('resetStatsBtn');
     if (resetStatsBtn) {
         resetStatsBtn.style.display = isAdmin ? 'block' : 'none';
+    }
+    const importBtn = document.getElementById('importBtn');
+    if (importBtn) {
+        importBtn.style.display = isAdmin ? 'block' : 'none';
     }
     
     loadWorkers().then(() => switchView('dashboard'));
@@ -145,6 +172,19 @@ async function loadStats() {
     document.getElementById('statTotalLogs').textContent = stats.total_logs || 0;
     document.getElementById('statWorkers').textContent = stats.total_workers || 0;
     document.getElementById('statTodayChecks').textContent = stats.today_checks || 0;
+    const profitEl = document.getElementById('statTotalProfit');
+    if (profitEl) profitEl.textContent = stats.total_profit || '0';
+    
+    // Trend
+    const trendEl = document.getElementById('statTrend');
+    const trendCard = document.getElementById('statTrendCard');
+    if (trendEl && trendCard) {
+        const trend = stats.trend_percent || 0;
+        const sign = trend >= 0 ? '+' : '';
+        trendEl.textContent = `${sign}${trend}%`;
+        trendCard.classList.toggle('trend-up', trend > 0);
+        trendCard.classList.toggle('trend-down', trend < 0);
+    }
     renderTagBars(stats.by_tag);
     renderLogsChart(stats.daily_stats);
     if (currentUser.role === 'admin') {
@@ -554,31 +594,39 @@ function editLogFromDetails(logId) {
 function renderLogsTable() {
     const el = document.getElementById('logsTableBody');
     const isAdmin = currentUser.role === 'admin';
+    const isArchive = document.getElementById('filterArchive')?.value === 'true';
     
     if (!logs?.length) { 
-        el.innerHTML = `<tr><td colspan="${isAdmin ? 10 : 9}" class="empty-state">Логов нет</td></tr>`; 
+        el.innerHTML = `<tr><td colspan="${isAdmin ? 12 : 11}" class="empty-state">${isArchive ? 'Архив пуст' : 'Логов нет'}</td></tr>`; 
         return; 
     }
     
     el.innerHTML = logs.map(l => `
-        <tr>
+        <tr class="${selectedLogs.has(l.id) ? 'selected' : ''} ${l.is_archived ? 'archived' : ''}">
+            <td><input type="checkbox" class="log-checkbox" data-id="${l.id}" ${selectedLogs.has(l.id) ? 'checked' : ''} onchange="toggleLogSelect(${l.id})"></td>
             <td class="cell-mono cell-muted">#${l.id}</td>
             ${isAdmin ? `<td><strong>${esc(l.worker_name)}</strong></td>` : ''}
             <td class="cell-mono">${esc(l.log_number)}</td>
             <td class="cell-mono">${esc(l.balance)}</td>
+            <td class="cell-mono cell-profit">${l.profit ? `<span class="profit-badge">+${esc(l.profit)}</span>` : '—'}</td>
             <td class="cell-owner">${l.owner ? `<span class="owner-badge">@${esc(l.owner)}</span>` : '—'}</td>
             <td class="cell-mono cell-muted">${l.install_date||'—'}</td>
             <td class="cell-mono cell-muted">${l.check_date||'—'}</td>
             <td><span class="tag-badge ${l.tag}">${TAG_LABELS[l.tag]||l.tag}</span></td>
-            <td class="cell-muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(l.comment)||'—'}</td>
             <td>
                 <div class="actions">
                     <button class="action-btn" onclick="editLog(${l.id})">✏️</button>
+                    ${l.is_archived 
+                        ? `<button class="action-btn" onclick="unarchiveLog(${l.id})" title="Восстановить">📤</button>`
+                        : `<button class="action-btn" onclick="archiveLog(${l.id})" title="Архив">📦</button>`
+                    }
                     <button class="action-btn" onclick="deleteLog(${l.id})">🗑️</button>
                 </div>
             </td>
         </tr>
     `).join('');
+    
+    updateBulkActionsUI();
 }
 
 function renderWorkersGrid() {
@@ -588,13 +636,17 @@ function renderWorkersGrid() {
         <div class="worker-card">
             <div class="worker-card-header">
                 <span class="worker-card-name">👤 ${esc(w.name)}</span>
+                <span class="worker-level">⭐ Ур.${w.level || 1}</span>
                 <div class="actions">
                     <button class="action-btn" onclick="editWorker(${w.id})">✏️</button>
                     <button class="action-btn" onclick="deleteWorker(${w.id})">🗑️</button>
                 </div>
             </div>
+            <div class="worker-xp-bar">
+                <div class="worker-xp-fill" style="width: ${Math.min((w.xp || 0) % 100, 100)}%"></div>
+            </div>
             <div class="worker-card-stats">${w.logs_count||0}</div>
-            <div class="worker-card-label">логов</div>
+            <div class="worker-card-label">логов | ${w.xp || 0} XP</div>
         </div>
     `).join('');
 }
@@ -676,6 +728,7 @@ function openLogModal(log = null) {
     document.getElementById('logWorker').value = log?.worker_id || (currentUser.worker_id || '');
     document.getElementById('logNumber').value = log?.log_number || '';
     document.getElementById('logBalance').value = log?.balance || '';
+    document.getElementById('logProfit').value = log?.profit || '';
     document.getElementById('logOwner').value = log?.owner || '';
     document.getElementById('logInstallDate').value = log?.install_date || '';
     document.getElementById('logCheckDate').value = log?.check_date || '';
@@ -694,6 +747,7 @@ async function saveLog(e) {
         worker_id: parseInt(document.getElementById('logWorker').value) || currentUser.worker_id,
         log_number: document.getElementById('logNumber').value,
         balance: document.getElementById('logBalance').value || '0',
+        profit: document.getElementById('logProfit').value || null,
         owner: document.getElementById('logOwner').value || null,
         install_date: document.getElementById('logInstallDate').value,
         check_date: document.getElementById('logCheckDate').value || null,
@@ -775,12 +829,230 @@ async function resetStats() {
     }
 }
 
+// ============ IMPORT/EXPORT ============
+
+function openImportModal() {
+    document.getElementById('importModal').classList.add('active');
+    document.getElementById('importData').value = '';
+    document.getElementById('importPreview').innerHTML = '';
+}
+
+function closeImportModal() {
+    document.getElementById('importModal').classList.remove('active');
+}
+
+function handleImportFile(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const text = e.target.result;
+        
+        // Если CSV
+        if (file.name.endsWith('.csv')) {
+            const rows = parseCSV(text);
+            document.getElementById('importData').value = JSON.stringify(rows, null, 2);
+            document.getElementById('importPreview').innerHTML = `<div class="import-preview-text">📊 Найдено ${rows.length} записей</div>`;
+        } else {
+            document.getElementById('importData').value = text;
+            try {
+                const data = JSON.parse(text);
+                document.getElementById('importPreview').innerHTML = `<div class="import-preview-text">📊 Найдено ${data.length} записей</div>`;
+            } catch {
+                document.getElementById('importPreview').innerHTML = `<div class="import-preview-error">❌ Некорректный JSON</div>`;
+            }
+        }
+    };
+    reader.readAsText(file);
+}
+
+function parseCSV(text) {
+    const lines = text.trim().split('\n');
+    if (lines.length < 2) return [];
+    
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+    const rows = [];
+    
+    for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',');
+        const row = {};
+        headers.forEach((h, idx) => {
+            row[h] = values[idx]?.trim() || '';
+        });
+        rows.push(row);
+    }
+    
+    return rows;
+}
+
+async function doImport() {
+    const dataText = document.getElementById('importData').value.trim();
+    if (!dataText) {
+        showToast('❌ Введите данные', 'error');
+        return;
+    }
+    
+    let rows;
+    try {
+        rows = JSON.parse(dataText);
+    } catch {
+        showToast('❌ Некорректный JSON', 'error');
+        return;
+    }
+    
+    if (!Array.isArray(rows) || rows.length === 0) {
+        showToast('❌ Нет данных', 'error');
+        return;
+    }
+    
+    const result = await api('POST', '/api/admin/import-csv', { rows });
+    if (result?.ok) {
+        showToast(`✅ Импортировано: ${result.imported}`);
+        if (result.errors?.length) {
+            console.warn('Import errors:', result.errors);
+        }
+        closeImportModal();
+        loadLogs();
+        loadStats();
+    } else {
+        showToast('❌ Ошибка импорта', 'error');
+    }
+}
+
+async function exportToCSV() {
+    const data = await api('GET', '/api/admin/export-csv');
+    if (!data) return;
+    
+    const headers = ['id', 'worker', 'log_number', 'balance', 'profit', 'owner', 'install_date', 'check_date', 'tag', 'comment', 'created_at'];
+    const csv = [headers.join(',')];
+    
+    data.forEach(row => {
+        const values = headers.map(h => `"${(row[h] || '').toString().replace(/"/g, '""')}"`);
+        csv.push(values.join(','));
+    });
+    
+    const blob = new Blob([csv.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `logs_export_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    
+    showToast(`📤 Экспортировано ${data.length} записей`);
+}
+
 // Filters
 function applyFilters() {
+    clearSelection();
     loadLogs({
         worker_id: document.getElementById('filterWorker').value,
-        tag: document.getElementById('filterTag').value
+        tag: document.getElementById('filterTag').value,
+        date_filter: document.getElementById('filterDate')?.value || '',
+        archived: document.getElementById('filterArchive')?.value || 'false'
     });
+}
+
+// ============ SELECTION & BULK ACTIONS ============
+
+function toggleLogSelect(id) {
+    if (selectedLogs.has(id)) {
+        selectedLogs.delete(id);
+    } else {
+        selectedLogs.add(id);
+    }
+    updateBulkActionsUI();
+}
+
+function toggleSelectAll() {
+    const selectAll = document.getElementById('selectAll');
+    if (selectAll.checked) {
+        logs.forEach(l => selectedLogs.add(l.id));
+    } else {
+        selectedLogs.clear();
+    }
+    renderLogsTable();
+}
+
+function clearSelection() {
+    selectedLogs.clear();
+    const selectAll = document.getElementById('selectAll');
+    if (selectAll) selectAll.checked = false;
+    updateBulkActionsUI();
+    renderLogsTable();
+}
+
+function updateBulkActionsUI() {
+    const bulkActions = document.getElementById('bulkActions');
+    const selectedCount = document.getElementById('selectedCount');
+    
+    if (bulkActions) {
+        bulkActions.style.display = selectedLogs.size > 0 ? 'flex' : 'none';
+    }
+    if (selectedCount) {
+        selectedCount.textContent = `${selectedLogs.size} выбрано`;
+    }
+}
+
+async function bulkDelete() {
+    if (selectedLogs.size === 0) return;
+    if (!confirm(`Удалить ${selectedLogs.size} логов?`)) return;
+    
+    const result = await api('POST', '/api/logs/bulk/delete', { ids: Array.from(selectedLogs) });
+    if (result?.ok) {
+        showToast(`✅ Удалено: ${result.deleted}`);
+        clearSelection();
+        loadLogs();
+        loadStats();
+    }
+}
+
+async function bulkArchive() {
+    if (selectedLogs.size === 0) return;
+    
+    const result = await api('POST', '/api/logs/bulk/archive', { ids: Array.from(selectedLogs) });
+    if (result?.ok) {
+        showToast(`📦 Архивировано: ${result.archived}`);
+        clearSelection();
+        loadLogs();
+        loadStats();
+    }
+}
+
+async function bulkChangeTag() {
+    if (selectedLogs.size === 0) return;
+    
+    const tag = prompt('Выберите тег:\n1 - Жир\n2 - Нищий\n3 - Средний\n4 - Есть ЗП');
+    const tagMap = { '1': 'fat', '2': 'poor', '3': 'medium', '4': 'salary' };
+    const newTag = tagMap[tag];
+    
+    if (!newTag) return;
+    
+    const result = await api('POST', '/api/logs/bulk/tag', { ids: Array.from(selectedLogs), tag: newTag });
+    if (result?.ok) {
+        showToast(`🏷 Изменено: ${result.updated}`);
+        clearSelection();
+        loadLogs();
+    }
+}
+
+// ============ ARCHIVE ============
+
+async function archiveLog(id) {
+    const result = await api('POST', `/api/logs/${id}/archive`);
+    if (result?.ok) {
+        showToast('📦 Архивировано');
+        loadLogs();
+        loadStats();
+    }
+}
+
+async function unarchiveLog(id) {
+    const result = await api('POST', `/api/logs/${id}/unarchive`);
+    if (result?.ok) {
+        showToast('📤 Восстановлено');
+        loadLogs();
+        loadStats();
+    }
 }
 
 // Search
@@ -874,6 +1146,16 @@ function updateMobileUI() {
 
 // Init
 document.addEventListener('DOMContentLoaded', () => {
+    // Theme
+    initTheme();
+    
+    // Register Service Worker (PWA)
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js')
+            .then(reg => console.log('SW registered'))
+            .catch(err => console.log('SW error', err));
+    }
+    
     // Login form
     document.getElementById('loginForm').addEventListener('submit', login);
     
@@ -893,6 +1175,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Filters
     document.getElementById('filterWorker').addEventListener('change', applyFilters);
     document.getElementById('filterTag').addEventListener('change', applyFilters);
+    document.getElementById('filterDate')?.addEventListener('change', applyFilters);
+    document.getElementById('filterArchive')?.addEventListener('change', applyFilters);
     document.getElementById('searchInput').addEventListener('input', handleSearch);
     
     // Tabs
