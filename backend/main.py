@@ -1313,23 +1313,26 @@ async def geelark_request(endpoint: str, data: dict, settings: GeelarkSettings) 
 def parse_geelark_serial_name(serial_name: str) -> str:
     """
     Парсит serialName из Geelark — извлекает только дату
+    Ищет дату в ЛЮБОМ месте строки
     Примеры:
     - "01.02 19741" → "01.02"
     - "02.02" → "02.02"
-    - "15.01 12345 extra" → "15.01"
+    - "НЕ 15.01 12345" → "15.01"
+    - "ЖИР 03.02" → "03.02"
+    - "test 25-01 extra" → "25-01"
     """
     if not serial_name:
         return "—"
     
     serial_name = serial_name.strip()
     
-    # Ищем дату в формате DD.MM или DD-MM
-    date_match = re.match(r'^(\d{1,2}[.\-/]\d{1,2})', serial_name)
+    # Ищем дату в формате DD.MM или DD-MM или DD/MM в ЛЮБОМ месте строки
+    date_match = re.search(r'(\d{1,2}[.\-/]\d{1,2})', serial_name)
     if date_match:
         return date_match.group(1)
     
-    # Если нет даты, берём первое слово/часть до пробела
-    return serial_name.split()[0] if ' ' in serial_name else serial_name
+    # Если нет даты — возвращаем прочерк
+    return "—"
 
 
 def parse_geelark_remark(remark: str) -> dict:
