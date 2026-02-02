@@ -1850,9 +1850,19 @@ function updateGeelarkWorkerSelects() {
 }
 
 // Init
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // Theme
     initTheme();
+    
+    // Check for token in URL (from Telegram Web App)
+    const urlParams = new URLSearchParams(window.location.search);
+    const tokenFromUrl = urlParams.get('token');
+    if (tokenFromUrl) {
+        authToken = tokenFromUrl;
+        localStorage.setItem('token', authToken);
+        // Clear token from URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
     
     // Register Service Worker (PWA)
     if ('serviceWorker' in navigator) {

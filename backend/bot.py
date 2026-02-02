@@ -6,7 +6,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
 
 import os
 from dotenv import load_dotenv
@@ -15,6 +15,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8286352882:AAFuO-HqBFrnA4gui9EUXsq2GTq6uyAS14U")
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # Telegram ID админа для уведомлений
+WEB_APP_URL = os.getenv("WEB_APP_URL", "https://logs.trf404.com")  # URL сайта для Web App
 
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
@@ -46,20 +47,29 @@ TAG_LABELS = {
 }
 
 
-def main_kb(is_admin=False):
-    """Клавиатура меню. Админ может добавлять логи, воркеры - нет"""
+def main_kb(is_admin=False, user_token=None):
+    """Клавиатура меню с Web App. Админ может добавлять логи, воркеры - нет"""
+    # Web App кнопка с токеном для авторизации
+    webapp_url = WEB_APP_URL
+    if user_token:
+        webapp_url = f"{WEB_APP_URL}?token={user_token}"
+    
+    webapp_btn = KeyboardButton(text="🌐 Открыть сайт", web_app=WebAppInfo(url=webapp_url))
+    
     if is_admin:
         return ReplyKeyboardMarkup(keyboard=[
             [KeyboardButton(text="➕ Добавить лог"), KeyboardButton(text="📋 Все логи")],
             [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="🏆 Топ недели")],
             [KeyboardButton(text="🔔 Проверки"), KeyboardButton(text="🔍 Поиск")],
-            [KeyboardButton(text="🎯 Прогресс"), KeyboardButton(text="🚪 Выйти")]
+            [KeyboardButton(text="🎯 Прогресс"), webapp_btn],
+            [KeyboardButton(text="🚪 Выйти")]
         ], resize_keyboard=True)
     else:
         return ReplyKeyboardMarkup(keyboard=[
             [KeyboardButton(text="📋 Мои логи"), KeyboardButton(text="📊 Статистика")],
             [KeyboardButton(text="🏆 Топ недели"), KeyboardButton(text="🔔 Проверки")],
-            [KeyboardButton(text="🎯 Мой прогресс"), KeyboardButton(text="🚪 Выйти")]
+            [KeyboardButton(text="🎯 Мой прогресс"), webapp_btn],
+            [KeyboardButton(text="🚪 Выйти")]
         ], resize_keyboard=True)
 
 
@@ -138,9 +148,10 @@ async def cmd_start(message: types.Message, state: FSMContext):
     if user_id in authorized_users:
         user = authorized_users[user_id]
         is_admin = user.get('role') == 'admin'
+        user_token = user.get('token')
         await message.answer(
             f"👋 С возвращением, *{user.get('worker_name', user.get('username'))}*!",
-            reply_markup=main_kb(is_admin),
+            reply_markup=main_kb(is_admin, user_token),
             parse_mode="Markdown"
         )
         return
@@ -169,10 +180,11 @@ async def process_key(message: types.Message, state: FSMContext):
                     
                     await state.clear()
                     is_admin = user.get('role') == 'admin'
+                    user_token = user.get('token')
                     await message.answer(
                         f"✅ *Авторизация успешна!*\n\n"
                         f"Добро пожаловать, *{user.get('worker_name', user.get('username'))}*!",
-                        reply_markup=main_kb(is_admin),
+                        reply_markup=main_kb(is_admin, user_token),
                         parse_mode="Markdown"
                     )
                 else:
