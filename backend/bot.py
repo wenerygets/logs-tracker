@@ -743,6 +743,54 @@ async def send_backup_to_admin():
         logging.error(f"Ошибка отправки бэкапа: {e}")
 
 
+async def sync_geelark():
+    """Автосинхронизация с Geelark"""
+    logging.info("📱 Запуск автосинхронизации Geelark...")
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Проверяем включена ли автосинхронизация
+            async with session.get(f"{API_URL}/api/geelark/settings") as resp:
+                if resp.status != 200:
+                    return
+                settings = await resp.json()
+                
+                if not settings.get('configured') or not settings.get('auto_sync_enabled'):
+                    logging.info("📱 Автосинхронизация Geelark отключена")
+                    return
+            
+            # Выполняем синхронизацию
+            async with session.post(f"{API_URL}/api/geelark/sync") as resp:
+                if resp.status == 200:
+                    result = await resp.json()
+                    if result.get('ok'):
+                        imported = result.get('imported', 0)
+                        if imported > 0:
+                            logging.info(f"✅ Geelark: импортировано {imported} новых логов")
+                            
+                            # Уведомляем админа если были импортированы логи
+                            if ADMIN_CHAT_ID and imported > 0:
+                                try:
+                                    await bot.send_message(
+                                        int(ADMIN_CHAT_ID),
+                                        f"📱 *Geelark Sync*\n\n"
+                                        f"✅ Импортировано: *{imported}* логов\n"
+                                        f"⏭️ Пропущено: {result.get('skipped', 0)}\n"
+                                        f"📊 Всего в Geelark: {result.get('total_phones', '—')}",
+                                        parse_mode="Markdown"
+                                    )
+                                except:
+                                    pass
+                        else:
+                            logging.info("📱 Geelark: новых телефонов нет")
+                    else:
+                        logging.warning(f"⚠️ Geelark sync error: {result}")
+                else:
+                    logging.error(f"❌ Geelark sync failed: {resp.status}")
+    except Exception as e:
+        logging.error(f"❌ Ошибка синхронизации Geelark: {e}")
+
+
 @dp.message(F.text == "/backup")
 async def manual_backup(msg: types.Message):
     """Ручной бэкап (только админ)"""
@@ -772,6 +820,8 @@ async def manual_backup(msg: types.Message):
 
 async def scheduler():
     """Планировщик уведомлений"""
+    geelark_last_sync = 0  # Время последней синхронизации Geelark
+    
     while True:
         now = datetime.now()
         
@@ -794,6 +844,13 @@ async def scheduler():
         # Автобэкап каждый день в 3:00
         if now.hour == 3 and now.minute == 0:
             await send_backup_to_admin()
+        
+        # Geelark автосинхронизация каждые 30 минут
+        import time
+        current_time = time.time()
+        if current_time - geelark_last_sync >= 30 * 60:  # 30 минут
+            await sync_geelark()
+            geelark_last_sync = current_time
         
         # Ждём 60 секунд
         await asyncio.sleep(60)

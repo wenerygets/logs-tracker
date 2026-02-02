@@ -119,6 +119,58 @@ def migrate():
     except Exception as e:
         print(f"[-] Ошибка custom_tags: {e}")
     
+    # 7. Создаём таблицу geelark_settings (настройки Geelark)
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS geelark_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bearer_token VARCHAR(100),
+                app_id VARCHAR(100),
+                api_key VARCHAR(100),
+                auto_sync_enabled BOOLEAN DEFAULT 0,
+                sync_interval_minutes INTEGER DEFAULT 30,
+                default_worker_id INTEGER,
+                last_sync_at DATETIME,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (default_worker_id) REFERENCES workers(id)
+            )
+        """)
+        print("[+] Таблица geelark_settings создана")
+    except Exception as e:
+        print(f"[-] Ошибка geelark_settings: {e}")
+    
+    # 8. Создаём таблицу geelark_group_mappings (маппинг групп)
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS geelark_group_mappings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                geelark_group_id VARCHAR(100) UNIQUE NOT NULL,
+                geelark_group_name VARCHAR(255),
+                worker_id INTEGER NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (worker_id) REFERENCES workers(id)
+            )
+        """)
+        print("[+] Таблица geelark_group_mappings создана")
+    except Exception as e:
+        print(f"[-] Ошибка geelark_group_mappings: {e}")
+    
+    # 9. Создаём таблицу geelark_synced_phones (синхронизированные телефоны)
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS geelark_synced_phones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                geelark_phone_id VARCHAR(100) UNIQUE NOT NULL,
+                serial_no VARCHAR(50),
+                log_id INTEGER,
+                synced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (log_id) REFERENCES logs(id)
+            )
+        """)
+        print("[+] Таблица geelark_synced_phones создана")
+    except Exception as e:
+        print(f"[-] Ошибка geelark_synced_phones: {e}")
+    
     conn.commit()
     
     # Показываем статистику

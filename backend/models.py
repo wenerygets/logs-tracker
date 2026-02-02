@@ -181,6 +181,67 @@ class AuditLog(Base):
         }
 
 
+class GeelarkSettings(Base):
+    """Настройки интеграции с Geelark"""
+    __tablename__ = "geelark_settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    bearer_token = Column(String(100), nullable=True)
+    app_id = Column(String(100), nullable=True)
+    api_key = Column(String(100), nullable=True)
+    auto_sync_enabled = Column(Boolean, default=False)
+    sync_interval_minutes = Column(Integer, default=30)
+    default_worker_id = Column(Integer, ForeignKey("workers.id"), nullable=True)
+    last_sync_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "bearer_token": self.bearer_token[:10] + "..." if self.bearer_token else None,
+            "app_id": self.app_id,
+            "auto_sync_enabled": self.auto_sync_enabled,
+            "sync_interval_minutes": self.sync_interval_minutes,
+            "default_worker_id": self.default_worker_id,
+            "last_sync_at": self.last_sync_at.isoformat() if self.last_sync_at else None
+        }
+
+
+class GeelarkGroupMapping(Base):
+    """Маппинг групп Geelark на воркеров"""
+    __tablename__ = "geelark_group_mappings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    geelark_group_id = Column(String(100), nullable=False, unique=True)
+    geelark_group_name = Column(String(255), nullable=True)
+    worker_id = Column(Integer, ForeignKey("workers.id"), nullable=False)
+    created_at = Column(DateTime, default=func.now())
+
+    worker = relationship("Worker")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "geelark_group_id": self.geelark_group_id,
+            "geelark_group_name": self.geelark_group_name,
+            "worker_id": self.worker_id,
+            "worker_name": self.worker.name if self.worker else None
+        }
+
+
+class GeelarkSyncedPhone(Base):
+    """Синхронизированные телефоны из Geelark"""
+    __tablename__ = "geelark_synced_phones"
+
+    id = Column(Integer, primary_key=True, index=True)
+    geelark_phone_id = Column(String(100), nullable=False, unique=True)
+    serial_no = Column(String(50), nullable=True)
+    log_id = Column(Integer, ForeignKey("logs.id"), nullable=True)
+    synced_at = Column(DateTime, default=func.now())
+
+    log = relationship("Log")
+
+
 class Log(Base):
     """Лог"""
     __tablename__ = "logs"

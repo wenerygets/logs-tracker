@@ -138,8 +138,9 @@ function showApp() {
         <small>${isAdmin ? '👑 Админ' : '👤 Воркер'}</small>
     `;
     
-    // Hide workers nav for workers
+    // Hide workers and geelark nav for workers
     document.getElementById('navWorkers').style.display = isAdmin ? 'flex' : 'none';
+    document.getElementById('navGeelark').style.display = isAdmin ? 'flex' : 'none';
     
     // Hide workers card in stats
     document.getElementById('statWorkersCard').style.display = isAdmin ? 'flex' : 'none';
@@ -205,6 +206,7 @@ async function loadStats() {
 async function loadWorkers() {
     workers = await api('GET', '/api/workers') || [];
     updateWorkerSelects();
+    updateGeelarkWorkerSelects();
 }
 
 async function loadLogs(filters = {}) {
@@ -889,8 +891,8 @@ function updateWorkerSelects() {
 
 // Navigation
 function switchView(view) {
-    // Workers view only for admin
-    if (view === 'workers' && currentUser.role !== 'admin') {
+    // Workers and Geelark view only for admin
+    if ((view === 'workers' || view === 'geelark') && currentUser.role !== 'admin') {
         view = 'dashboard';
     }
     
@@ -912,7 +914,8 @@ function switchView(view) {
         dashboard: ['Dashboard', 'Общая статистика'],
         logs: ['Все логи', currentUser.role === 'admin' ? 'Управление логами' : 'Мои логи'],
         workers: ['Воркеры', 'Управление воркерами'],
-        reminders: ['Проверки', 'Логи на проверку']
+        reminders: ['Проверки', 'Логи на проверку'],
+        geelark: ['Geelark', 'Интеграция с Geelark']
     };
     document.getElementById('pageTitle').textContent = titles[view][0];
     document.getElementById('pageSubtitle').textContent = titles[view][1];
@@ -923,6 +926,7 @@ function switchView(view) {
     else if (view === 'logs') { loadLogs(); }
     else if (view === 'workers') { loadWorkers().then(() => renderWorkersGrid()); }
     else if (view === 'reminders') { loadReminders(reminderDays); }
+    else if (view === 'geelark') { loadGeelarkSettings(); }
 }
 
 // Log Modal
@@ -1498,6 +1502,246 @@ function updateMobileUI() {
     const bottomNavWorkers = document.getElementById('bottomNavWorkers');
     if (bottomNavWorkers) {
         bottomNavWorkers.style.display = isAdmin ? 'flex' : 'none';
+    }
+}
+
+// ============ GEELARK INTEGRATION ============
+
+let geelarkSettings = null;
+let geelarkMappings = [];
+
+async function loadGeelarkSettings() {
+    const data = await api('GET', '/api/geelark/settings');
+    if (data) {
+        geelarkSettings = data;
+        
+        // Update UI
+        if (data.configured) {
+            document.getElementById('geelarkToken').value = '••••••••••••••••••';
+            document.getElementById('geelarkDefaultWorker').value = data.default_worker_id || '';
+            document.getElementById('geelarkAutoSync').checked = data.auto_sync_enabled || false;
+            
+            if (data.last_sync_at) {
+                document.getElementById('geelarkLastSync').textContent = `Последняя синхронизация: ${formatDate(data.last_sync_at)}`;
+            }
+            
+            // Test connection on load
+            testGeelarkConnection();
+        }
+    }
+    
+    // Load mappings
+    await loadGeelarkMappings();
+}
+
+async function loadGeelarkMappings() {
+    const data = await api('GET', '/api/geelark/groups');
+    if (data?.mappings) {
+        geelarkMappings = data.mappings;
+        renderGeelarkMappings();
+    }
+}
+
+function renderGeelarkMappings() {
+    const el = document.getElementById('geelarkMappings');
+    if (!geelarkMappings.length) {
+        el.innerHTML = '<div class="empty-state">Нет маппингов. Добавьте связь группы Geelark с воркером.</div>';
+        return;
+    }
+    
+    el.innerHTML = geelarkMappings.map(m => `
+        <div class="geelark-mapping-item">
+            <div class="geelark-mapping-group">
+                <span class="geelark-mapping-group-name">${esc(m.geelark_group_name || 'Без названия')}</span>
+                <span class="geelark-mapping-group-id">${esc(m.geelark_group_id)}</span>
+            </div>
+            <div class="geelark-mapping-worker">
+                <span>→</span>
+                <span>👤 ${esc(m.worker_name)}</span>
+            </div>
+            <button class="action-btn" onclick="deleteGeelarkMapping(${m.id})">🗑️</button>
+        </div>
+    `).join('');
+}
+
+async function saveGeelarkSettings() {
+    const token = document.getElementById('geelarkToken').value;
+    const defaultWorker = document.getElementById('geelarkDefaultWorker').value;
+    const autoSync = document.getElementById('geelarkAutoSync').checked;
+    
+    // Don't send masked token
+    const data = {
+        default_worker_id: defaultWorker ? parseInt(defaultWorker) : null,
+        auto_sync_enabled: autoSync
+    };
+    
+    // Only send token if it's not masked
+    if (token && !token.includes('•')) {
+        data.bearer_token = token;
+    }
+    
+    const result = await api('POST', '/api/geelark/settings', data);
+    if (result?.ok) {
+        showToast('✅ Настройки сохранены!');
+        loadGeelarkSettings();
+    } else {
+        showToast('❌ Ошибка сохранения', 'error');
+    }
+}
+
+async function testGeelarkConnection() {
+    const result = await api('GET', '/api/geelark/test');
+    const statusDot = document.querySelector('.geelark-status-dot');
+    const statusText = document.getElementById('geelarkStatusText');
+    
+    if (result?.ok) {
+        statusDot.classList.remove('not-connected');
+        statusDot.classList.add('connected');
+        statusText.textContent = result.message;
+        showToast('✅ ' + result.message);
+    } else {
+        statusDot.classList.remove('connected');
+        statusDot.classList.add('not-connected');
+        statusText.textContent = result?.error || 'Ошибка подключения';
+        showToast('❌ ' + (result?.error || 'Ошибка подключения'), 'error');
+    }
+}
+
+async function syncGeelark() {
+    showToast('🔄 Синхронизация...');
+    
+    const result = await api('POST', '/api/geelark/sync');
+    
+    if (result?.ok) {
+        showToast(`✅ Импортировано: ${result.imported}, пропущено: ${result.skipped}`);
+        showConfetti();
+        
+        // Update stats
+        document.getElementById('geelarkSyncStats').innerHTML = `
+            📊 Всего телефонов: ${result.total_phones}<br>
+            ✅ Импортировано: ${result.imported}<br>
+            ⏭️ Пропущено: ${result.skipped}
+            ${result.errors?.length ? `<br>❌ Ошибок: ${result.errors.length}` : ''}
+        `;
+        
+        document.getElementById('geelarkLastSync').textContent = 'Последняя синхронизация: сейчас';
+        
+        // Show new groups
+        if (result.new_groups?.length) {
+            showToast(`⚠️ Найдено ${result.new_groups.length} новых групп. Добавьте маппинги!`);
+        }
+        
+        // Reload logs
+        loadLogs();
+        loadStats();
+    } else {
+        showToast('❌ Ошибка синхронизации', 'error');
+    }
+}
+
+async function fetchGeelarkGroups() {
+    showToast('📥 Загрузка групп...');
+    
+    const result = await api('GET', '/api/geelark/fetch-groups');
+    
+    if (result?.ok && result.groups) {
+        // Show groups for mapping
+        const groups = result.groups;
+        
+        if (!groups.length) {
+            showToast('Группы не найдены', 'error');
+            return;
+        }
+        
+        // Create a selection dialog
+        const existingIds = new Set(geelarkMappings.map(m => m.geelark_group_id));
+        
+        let html = '<div class="geelark-groups-list">';
+        
+        for (const g of groups) {
+            const isMapped = existingIds.has(g.id);
+            html += `
+                <div class="geelark-group-item ${isMapped ? 'mapped' : ''}" onclick="selectGroupForMapping('${esc(g.id)}', '${esc(g.name)}')">
+                    <div class="geelark-group-info">
+                        <span class="geelark-group-name">${esc(g.name)}</span>
+                        <span class="geelark-group-phones">${g.phones_count} телефонов</span>
+                    </div>
+                    ${isMapped ? '<span title="Уже привязано">✅</span>' : '<span title="Нажмите для привязки">➕</span>'}
+                </div>
+            `;
+        }
+        
+        html += '</div>';
+        
+        // Insert after mappings
+        const mappingsEl = document.getElementById('geelarkMappings');
+        mappingsEl.insertAdjacentHTML('afterend', html);
+        
+        showToast(`✅ Найдено ${groups.length} групп`);
+    } else {
+        showToast('❌ Ошибка загрузки групп', 'error');
+    }
+}
+
+function selectGroupForMapping(groupId, groupName) {
+    document.getElementById('newMappingGroupId').value = groupId;
+    document.getElementById('newMappingGroupName').value = groupName;
+    
+    // Remove the groups list
+    document.querySelector('.geelark-groups-list')?.remove();
+    
+    // Focus worker select
+    document.getElementById('newMappingWorker').focus();
+}
+
+async function addGeelarkMapping() {
+    const groupId = document.getElementById('newMappingGroupId').value.trim();
+    const groupName = document.getElementById('newMappingGroupName').value.trim();
+    const workerId = document.getElementById('newMappingWorker').value;
+    
+    if (!groupId || !workerId) {
+        showToast('Укажите ID группы и воркера', 'error');
+        return;
+    }
+    
+    const result = await api('POST', '/api/geelark/groups/mapping', {
+        geelark_group_id: groupId,
+        geelark_group_name: groupName,
+        worker_id: parseInt(workerId)
+    });
+    
+    if (result?.ok) {
+        showToast('✅ Маппинг добавлен!');
+        document.getElementById('newMappingGroupId').value = '';
+        document.getElementById('newMappingGroupName').value = '';
+        document.getElementById('newMappingWorker').value = '';
+        loadGeelarkMappings();
+    } else {
+        showToast('❌ Ошибка добавления', 'error');
+    }
+}
+
+async function deleteGeelarkMapping(id) {
+    if (!confirm('Удалить маппинг?')) return;
+    
+    const result = await api('DELETE', `/api/geelark/groups/mapping/${id}`);
+    if (result?.ok) {
+        showToast('🗑️ Маппинг удалён');
+        loadGeelarkMappings();
+    }
+}
+
+function updateGeelarkWorkerSelects() {
+    const opts = workers.map(w => `<option value="${w.id}">${esc(w.name)}</option>`).join('');
+    
+    const defaultWorkerSelect = document.getElementById('geelarkDefaultWorker');
+    if (defaultWorkerSelect) {
+        defaultWorkerSelect.innerHTML = '<option value="">Выберите воркера</option>' + opts;
+    }
+    
+    const newMappingWorkerSelect = document.getElementById('newMappingWorker');
+    if (newMappingWorkerSelect) {
+        newMappingWorkerSelect.innerHTML = '<option value="">Воркер</option>' + opts;
     }
 }
 

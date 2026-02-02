@@ -11,8 +11,12 @@ import os
 import secrets
 
 from database import get_db, init_db
-from models import Log, Worker, LogTag, User, UserRole, Session, AuditLog, LogNote, CustomTag
+from models import Log, Worker, LogTag, User, UserRole, Session, AuditLog, LogNote, CustomTag, GeelarkSettings, GeelarkGroupMapping, GeelarkSyncedPhone
 import json
+import aiohttp
+import uuid
+import hashlib
+import re
 
 app = FastAPI(title="Logs Tracker", version="4.0.0")
 
@@ -1282,6 +1286,353 @@ async def bot_today_reminders(worker_id: int, db: AsyncSession = Depends(get_db)
                 logs.append(log)
     
     return [log.to_dict() for log in logs]
+
+
+# ==================== GEELARK INTEGRATION ====================
+
+GEELARK_API_URL = "https://openapi.geelark.com/open/v1"
+
+
+async def geelark_request(endpoint: str, data: dict, settings: GeelarkSettings) -> dict:
+    """Выполнить запрос к Geelark API"""
+    url = f"{GEELARK_API_URL}{endpoint}"
+    headers = {
+        "Content-Type": "application/json",
+        "traceId": str(uuid.uuid4())
+    }
+    
+    # Используем Bearer Token авторизацию
+    if settings.bearer_token:
+        headers["Authorization"] = f"Bearer {settings.bearer_token}"
+    
+    async with aiohttp.ClientSession() as session:
+        async with session.post(url, json=data, headers=headers) as resp:
+            return await resp.json()
+
+
+def parse_geelark_remark(remark: str) -> tuple:
+    """
+    Парсит remark из Geelark в баланс и даты проверки
+    Примеры:
+    - "76к" → balance="76к", check_date=None
+    - "76к-15-25" → balance="76к", check_date="15-25"
+    - "100к-8-24-25-29" → balance="100к", check_date="8-24-25-29"
+    """
+    if not remark:
+        return "0", None
+    
+    remark = remark.strip()
+    
+    # Паттерн: баланс (текст с к/кк) + опционально даты через дефис
+    # Ищем первую часть (баланс) - это всё до первого дефиса с числом после
+    parts = remark.split("-")
+    
+    if len(parts) == 1:
+        # Только баланс
+        return remark, None
+    
+    # Первая часть - баланс (может содержать к, кк, число)
+    balance = parts[0].strip()
+    
+    # Остальные части - даты (только если это числа)
+    check_parts = []
+    for part in parts[1:]:
+        part = part.strip()
+        if part.isdigit():
+            check_parts.append(part)
+        else:
+            # Если не число, добавляем к комментарию (пропускаем)
+            pass
+    
+    check_date = "-".join(check_parts) if check_parts else None
+    
+    return balance, check_date
+
+
+@app.get("/api/geelark/settings")
+async def get_geelark_settings(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Получить настройки Geelark"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    result = await db.execute(select(GeelarkSettings).limit(1))
+    settings = result.scalar_one_or_none()
+    
+    if not settings:
+        return {"configured": False}
+    
+    return {
+        "configured": True,
+        **settings.to_dict()
+    }
+
+
+@app.post("/api/geelark/settings")
+async def save_geelark_settings(data: dict, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Сохранить настройки Geelark"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    result = await db.execute(select(GeelarkSettings).limit(1))
+    settings = result.scalar_one_or_none()
+    
+    if not settings:
+        settings = GeelarkSettings()
+        db.add(settings)
+    
+    # Обновляем поля
+    if "bearer_token" in data:
+        settings.bearer_token = data["bearer_token"]
+    if "app_id" in data:
+        settings.app_id = data["app_id"]
+    if "api_key" in data:
+        settings.api_key = data["api_key"]
+    if "auto_sync_enabled" in data:
+        settings.auto_sync_enabled = data["auto_sync_enabled"]
+    if "sync_interval_minutes" in data:
+        settings.sync_interval_minutes = data["sync_interval_minutes"]
+    if "default_worker_id" in data:
+        settings.default_worker_id = data["default_worker_id"]
+    
+    await db.commit()
+    await db.refresh(settings)
+    
+    return {"ok": True, "settings": settings.to_dict()}
+
+
+@app.get("/api/geelark/groups")
+async def get_geelark_groups(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Получить группы из Geelark и маппинги"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    # Получаем маппинги из БД
+    result = await db.execute(
+        select(GeelarkGroupMapping).options(selectinload(GeelarkGroupMapping.worker))
+    )
+    mappings = [m.to_dict() for m in result.scalars().all()]
+    
+    return {"mappings": mappings}
+
+
+@app.post("/api/geelark/groups/mapping")
+async def save_group_mapping(data: dict, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Сохранить маппинг группы Geelark → воркер"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    geelark_group_id = data.get("geelark_group_id")
+    geelark_group_name = data.get("geelark_group_name")
+    worker_id = data.get("worker_id")
+    
+    if not geelark_group_id or not worker_id:
+        raise HTTPException(status_code=400, detail="Требуются geelark_group_id и worker_id")
+    
+    # Ищем существующий маппинг
+    result = await db.execute(
+        select(GeelarkGroupMapping).where(GeelarkGroupMapping.geelark_group_id == geelark_group_id)
+    )
+    mapping = result.scalar_one_or_none()
+    
+    if mapping:
+        mapping.worker_id = worker_id
+        mapping.geelark_group_name = geelark_group_name
+    else:
+        mapping = GeelarkGroupMapping(
+            geelark_group_id=geelark_group_id,
+            geelark_group_name=geelark_group_name,
+            worker_id=worker_id
+        )
+        db.add(mapping)
+    
+    await db.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/geelark/groups/mapping/{mapping_id}")
+async def delete_group_mapping(mapping_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Удалить маппинг группы"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    result = await db.execute(select(GeelarkGroupMapping).where(GeelarkGroupMapping.id == mapping_id))
+    mapping = result.scalar_one_or_none()
+    if mapping:
+        await db.delete(mapping)
+        await db.commit()
+    
+    return {"ok": True}
+
+
+@app.post("/api/geelark/sync")
+async def sync_geelark(data: dict = None, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Синхронизировать телефоны из Geelark"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    # Получаем настройки
+    result = await db.execute(select(GeelarkSettings).limit(1))
+    settings = result.scalar_one_or_none()
+    
+    if not settings or not settings.bearer_token:
+        raise HTTPException(status_code=400, detail="Geelark не настроен. Укажите Bearer Token.")
+    
+    # Запрашиваем телефоны из Geelark
+    try:
+        response = await geelark_request("/phone/list", {"page": 1, "pageSize": 100}, settings)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка подключения к Geelark: {str(e)}")
+    
+    if response.get("code") != 0:
+        raise HTTPException(status_code=400, detail=f"Ошибка Geelark: {response.get('msg', 'Неизвестная ошибка')}")
+    
+    phones = response.get("data", {}).get("items", [])
+    
+    # Получаем маппинги групп
+    mappings_result = await db.execute(select(GeelarkGroupMapping))
+    group_mappings = {m.geelark_group_id: m.worker_id for m in mappings_result.scalars().all()}
+    
+    # Получаем уже синхронизированные телефоны
+    synced_result = await db.execute(select(GeelarkSyncedPhone))
+    synced_phones = {s.geelark_phone_id: s for s in synced_result.scalars().all()}
+    
+    imported = 0
+    skipped = 0
+    errors = []
+    new_groups = set()
+    
+    for phone in phones:
+        phone_id = phone.get("id")
+        
+        # Уже синхронизирован?
+        if phone_id in synced_phones:
+            skipped += 1
+            continue
+        
+        # Определяем воркера
+        group = phone.get("group", {})
+        group_id = group.get("id")
+        group_name = group.get("name", "")
+        
+        worker_id = None
+        if group_id and group_id in group_mappings:
+            worker_id = group_mappings[group_id]
+        elif settings.default_worker_id:
+            worker_id = settings.default_worker_id
+        
+        # Собираем новые группы
+        if group_id and group_id not in group_mappings:
+            new_groups.add((group_id, group_name))
+        
+        if not worker_id:
+            errors.append(f"Телефон {phone.get('serialNo')}: не найден воркер для группы '{group_name}'")
+            continue
+        
+        # Парсим данные
+        serial_no = phone.get("serialNo", "")  # Номер лога
+        serial_name = phone.get("serialName", "")  # Дата установки
+        remark = phone.get("remark", "")  # Баланс и даты проверки
+        
+        balance, check_date = parse_geelark_remark(remark)
+        
+        # Создаём лог
+        try:
+            log = Log(
+                worker_id=worker_id,
+                log_number=serial_no,
+                balance=balance,
+                install_date=serial_name or "—",
+                check_date=check_date,
+                tag=LogTag.MEDIUM,
+                comment=f"Импорт из Geelark: {remark}" if remark else "Импорт из Geelark"
+            )
+            db.add(log)
+            await db.flush()
+            
+            # Сохраняем связь
+            synced = GeelarkSyncedPhone(
+                geelark_phone_id=phone_id,
+                serial_no=serial_no,
+                log_id=log.id
+            )
+            db.add(synced)
+            
+            imported += 1
+        except Exception as e:
+            errors.append(f"Телефон {serial_no}: {str(e)}")
+    
+    # Обновляем время синхронизации
+    settings.last_sync_at = datetime.now()
+    await db.commit()
+    
+    return {
+        "ok": True,
+        "imported": imported,
+        "skipped": skipped,
+        "total_phones": len(phones),
+        "errors": errors[:10],
+        "new_groups": [{"id": g[0], "name": g[1]} for g in new_groups]
+    }
+
+
+@app.get("/api/geelark/test")
+async def test_geelark_connection(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Тест подключения к Geelark"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    result = await db.execute(select(GeelarkSettings).limit(1))
+    settings = result.scalar_one_or_none()
+    
+    if not settings or not settings.bearer_token:
+        return {"ok": False, "error": "Bearer Token не настроен"}
+    
+    try:
+        response = await geelark_request("/phone/list", {"page": 1, "pageSize": 1}, settings)
+        
+        if response.get("code") == 0:
+            total = response.get("data", {}).get("total", 0)
+            return {"ok": True, "message": f"Подключено! Найдено телефонов: {total}"}
+        else:
+            return {"ok": False, "error": response.get("msg", "Неизвестная ошибка")}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/geelark/fetch-groups")
+async def fetch_geelark_groups(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Получить список групп из Geelark API"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    result = await db.execute(select(GeelarkSettings).limit(1))
+    settings = result.scalar_one_or_none()
+    
+    if not settings or not settings.bearer_token:
+        raise HTTPException(status_code=400, detail="Bearer Token не настроен")
+    
+    try:
+        # Получаем телефоны и собираем уникальные группы
+        response = await geelark_request("/phone/list", {"page": 1, "pageSize": 100}, settings)
+        
+        if response.get("code") != 0:
+            raise HTTPException(status_code=400, detail=response.get("msg", "Ошибка"))
+        
+        phones = response.get("data", {}).get("items", [])
+        groups = {}
+        
+        for phone in phones:
+            group = phone.get("group", {})
+            if group and group.get("id"):
+                groups[group["id"]] = {
+                    "id": group["id"],
+                    "name": group.get("name", "Без названия"),
+                    "phones_count": groups.get(group["id"], {}).get("phones_count", 0) + 1
+                }
+        
+        return {"ok": True, "groups": list(groups.values())}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

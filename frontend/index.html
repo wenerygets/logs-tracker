@@ -79,6 +79,9 @@
                 <a href="#" class="nav-item" data-view="reminders">
                     <span>🔔</span> Проверки
                 </a>
+                <a href="#" class="nav-item" data-view="geelark" id="navGeelark">
+                    <span>📱</span> Geelark
+                </a>
             </nav>
 
             <div class="sidebar-footer">
@@ -262,6 +265,73 @@
                         <button class="tab" data-days="30">30 дней</button>
                     </div>
                     <div class="reminders-grid" id="remindersGrid"></div>
+                </div>
+
+                <!-- Geelark Integration -->
+                <div class="view" id="geelarkView">
+                    <div class="card geelark-card">
+                        <h3>📱 Интеграция с Geelark</h3>
+                        <p class="geelark-desc">Автоматический импорт телефонов из Geelark</p>
+                        
+                        <div class="geelark-status" id="geelarkStatus">
+                            <span class="geelark-status-dot not-connected"></span>
+                            <span id="geelarkStatusText">Не подключено</span>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Bearer Token</label>
+                            <input type="password" id="geelarkToken" placeholder="Введите Bearer Token из Geelark">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Воркер по умолчанию</label>
+                            <select id="geelarkDefaultWorker">
+                                <option value="">Выберите воркера</option>
+                            </select>
+                            <small class="form-hint">Для телефонов без группы</small>
+                        </div>
+
+                        <div class="form-group checkbox-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="geelarkAutoSync">
+                                <span>🔄 Автосинхронизация (каждые 30 минут)</span>
+                            </label>
+                        </div>
+
+                        <div class="geelark-actions">
+                            <button class="btn btn-secondary" onclick="saveGeelarkSettings()">💾 Сохранить</button>
+                            <button class="btn btn-secondary" onclick="testGeelarkConnection()">🔗 Проверить</button>
+                            <button class="btn btn-primary" onclick="syncGeelark()">🔄 Синхронизировать</button>
+                        </div>
+                    </div>
+
+                    <div class="card geelark-card">
+                        <h3>🗂️ Маппинг групп Geelark → Воркеры</h3>
+                        <p class="geelark-desc">Укажите какой группе Geelark соответствует какой воркер</p>
+                        
+                        <button class="btn btn-secondary" onclick="fetchGeelarkGroups()">📥 Загрузить группы из Geelark</button>
+                        
+                        <div class="geelark-mappings" id="geelarkMappings">
+                            <div class="empty-state">Нет маппингов</div>
+                        </div>
+                        
+                        <div class="geelark-add-mapping">
+                            <input type="text" id="newMappingGroupId" placeholder="ID группы Geelark">
+                            <input type="text" id="newMappingGroupName" placeholder="Название группы">
+                            <select id="newMappingWorker">
+                                <option value="">Воркер</option>
+                            </select>
+                            <button class="btn btn-sm btn-primary" onclick="addGeelarkMapping()">➕</button>
+                        </div>
+                    </div>
+
+                    <div class="card geelark-card">
+                        <h3>📊 Последняя синхронизация</h3>
+                        <div class="geelark-sync-info">
+                            <div id="geelarkLastSync">—</div>
+                            <div id="geelarkSyncStats"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </main>
