@@ -1558,7 +1558,29 @@ async def sync_geelark(data: dict = None, user: User = Depends(get_current_user)
     
     # Получаем всех воркеров для автоматического маппинга по имени
     workers_result = await db.execute(select(Worker))
-    workers_by_name = {w.name.lower().strip(): w.id for w in workers_result.scalars().all()}
+    workers_list = workers_result.scalars().all()
+    
+    # Нормализуем имена: нижний регистр, убираем пробелы, заменяем кириллицу на латиницу
+    def normalize_name(name):
+        if not name:
+            return ""
+        name = name.lower().strip()
+        # Заменяем похожие символы кириллица <-> латиница
+        replacements = {
+            'с': 'c', 'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 
+            'х': 'x', 'у': 'y', 'к': 'k', 'н': 'h', 'в': 'b',
+            'м': 'm', 'т': 't'
+        }
+        for cyr, lat in replacements.items():
+            name = name.replace(cyr, lat)
+        return name
+    
+    workers_by_name = {}
+    for w in workers_list:
+        # Добавляем оригинальное имя
+        workers_by_name[w.name.lower().strip()] = w.id
+        # Добавляем нормализованное имя
+        workers_by_name[normalize_name(w.name)] = w.id
     
     # Получаем уже синхронизированные телефоны
     synced_result = await db.execute(select(GeelarkSyncedPhone))
@@ -1590,9 +1612,14 @@ async def sync_geelark(data: dict = None, user: User = Depends(get_current_user)
         
         # 2. Автоматический маппинг по имени группы = имени воркера
         if not worker_id and group_name:
+            # Пробуем разные варианты имени
             group_name_lower = group_name.lower().strip()
+            group_name_normalized = normalize_name(group_name)
+            
             if group_name_lower in workers_by_name:
                 worker_id = workers_by_name[group_name_lower]
+            elif group_name_normalized in workers_by_name:
+                worker_id = workers_by_name[group_name_normalized]
         
         # 3. Если нет маппинга — используем воркера по умолчанию
         if not worker_id and settings.default_worker_id:
