@@ -3,6 +3,10 @@ let logs = [], workers = [], stats = {}, currentView = 'dashboard', reminderDays
 let currentUser = null;
 let authToken = localStorage.getItem('token');
 
+// Charts
+let logsChart = null;
+let tagsChart = null;
+
 const TAG_LABELS = {
     fat: '🔥 Жир',
     poor: '💸 Нищий',
@@ -133,8 +137,14 @@ async function loadStats() {
     document.getElementById('statWorkers').textContent = stats.total_workers || 0;
     document.getElementById('statTodayChecks').textContent = stats.today_checks || 0;
     renderTagBars(stats.by_tag);
+    renderLogsChart(stats.daily_stats);
     if (currentUser.role === 'admin') {
         renderWorkersWithPlan(stats.workers_stats || []);
+        renderLeaderboard(stats.workers_stats || []);
+        document.getElementById('workersPlanCard').style.display = 'block';
+    } else {
+        const planCard = document.getElementById('workersPlanCard');
+        if (planCard) planCard.style.display = 'none';
     }
 }
 
@@ -175,6 +185,217 @@ function renderTagBars(byTag) {
             <span class="tag-bar-value">${byTag[t.k]||0}</span>
         </div>
     `).join('');
+    
+    // Render tags pie chart
+    renderTagsChart(byTag);
+}
+
+// ============ CHARTS ============
+
+function renderLogsChart(dailyStats) {
+    const ctx = document.getElementById('logsChart');
+    if (!ctx) return;
+    
+    // Destroy existing chart
+    if (logsChart) {
+        logsChart.destroy();
+    }
+    
+    // Generate last 7 days labels
+    const labels = [];
+    const data = [];
+    const today = new Date();
+    
+    for (let i = 6; i >= 0; i--) {
+        const date = new Date(today);
+        date.setDate(date.getDate() - i);
+        const dayName = date.toLocaleDateString('ru-RU', { weekday: 'short' });
+        const dayNum = date.getDate();
+        labels.push(`${dayName} ${dayNum}`);
+        // Use real data from API
+        const dataIndex = 6 - i;
+        data.push(dailyStats?.[dataIndex] ?? 0);
+    }
+    
+    logsChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Логи',
+                data: data,
+                borderColor: '#8b5cf6',
+                backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                borderWidth: 3,
+                fill: true,
+                tension: 0.4,
+                pointBackgroundColor: '#8b5cf6',
+                pointBorderColor: '#fff',
+                pointBorderWidth: 2,
+                pointRadius: 5,
+                pointHoverRadius: 8
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: {
+                        color: 'rgba(139, 92, 246, 0.1)'
+                    },
+                    ticks: {
+                        color: '#7a7a95'
+                    }
+                },
+                x: {
+                    grid: {
+                        display: false
+                    },
+                    ticks: {
+                        color: '#7a7a95'
+                    }
+                }
+            }
+        }
+    });
+}
+
+function renderTagsChart(byTag) {
+    const ctx = document.getElementById('tagsChart');
+    if (!ctx || !byTag) return;
+    
+    if (tagsChart) {
+        tagsChart.destroy();
+    }
+    
+    const data = [
+        byTag.fat || 0,
+        byTag.medium || 0,
+        byTag.salary || 0,
+        byTag.poor || 0
+    ];
+    
+    tagsChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['🔥 Жир', '📊 Средний', '💰 Есть ЗП', '💸 Нищий'],
+            datasets: [{
+                data: data,
+                backgroundColor: [
+                    'rgba(239, 68, 68, 0.8)',
+                    'rgba(139, 92, 246, 0.8)',
+                    'rgba(16, 185, 129, 0.8)',
+                    'rgba(107, 114, 128, 0.8)'
+                ],
+                borderColor: [
+                    '#ef4444',
+                    '#8b5cf6',
+                    '#10b981',
+                    '#6b7280'
+                ],
+                borderWidth: 2,
+                hoverOffset: 10
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        color: '#e8e8f0',
+                        padding: 15,
+                        font: {
+                            size: 12
+                        }
+                    }
+                }
+            },
+            cutout: '60%'
+        }
+    });
+}
+
+// ============ LEADERBOARD ============
+
+function renderLeaderboard(workersStats) {
+    const el = document.getElementById('leaderboard');
+    if (!el) return;
+    
+    if (!workersStats || !workersStats.length) {
+        el.innerHTML = '<div class="empty-state">Нет данных</div>';
+        return;
+    }
+    
+    // Sort by total logs
+    const sorted = [...workersStats].sort((a, b) => b.total - a.total).slice(0, 5);
+    
+    el.innerHTML = sorted.map((w, idx) => {
+        let rankClass = 'regular';
+        let rankIcon = idx + 1;
+        
+        if (idx === 0) { rankClass = 'gold'; rankIcon = '🥇'; }
+        else if (idx === 1) { rankClass = 'silver'; rankIcon = '🥈'; }
+        else if (idx === 2) { rankClass = 'bronze'; rankIcon = '🥉'; }
+        
+        return `
+        <div class="leaderboard-item" onclick="viewWorkerLogs(${w.id}, '${esc(w.name)}')">
+            <div class="leaderboard-rank ${rankClass}">${rankIcon}</div>
+            <div class="leaderboard-info">
+                <div class="leaderboard-name">${esc(w.name)}</div>
+                <div class="leaderboard-stats">Сегодня: ${w.today} | Неделя: ${w.week}</div>
+            </div>
+            <div class="leaderboard-count">${w.total}</div>
+        </div>`;
+    }).join('');
+}
+
+// ============ EXPORT TO EXCEL ============
+
+async function exportToExcel() {
+    // Get all logs
+    const allLogs = await api('GET', '/api/logs', { limit: 10000 });
+    if (!allLogs || !allLogs.length) {
+        alert('Нет данных для экспорта');
+        return;
+    }
+    
+    // Create CSV content
+    const headers = ['ID', 'Воркер', '№ Лога', 'Баланс', 'Владелец', 'Дата установки', 'Дата проверки', 'Тег', 'Комментарий', 'Создан'];
+    const rows = allLogs.map(l => [
+        l.id,
+        l.worker_name || '',
+        l.log_number || '',
+        l.balance || '',
+        l.owner || '',
+        l.install_date || '',
+        l.check_date || '',
+        TAG_LABELS[l.tag] || l.tag || '',
+        (l.comment || '').replace(/[\n\r]/g, ' '),
+        l.created_at || ''
+    ]);
+    
+    // BOM for UTF-8
+    const BOM = '\uFEFF';
+    const csvContent = BOM + [
+        headers.join(';'),
+        ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(';'))
+    ].join('\n');
+    
+    // Download
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `logs_export_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
 }
 
 function renderWorkersWithPlan(workersStats) {
@@ -462,7 +683,15 @@ async function saveLog(e) {
     };
     const id = document.getElementById('logId').value;
     const r = id ? await api('PUT', `/api/logs/${id}`, data) : await api('POST', '/api/logs', data);
-    if (r) { closeLogModal(); loadLogs(); loadStats(); }
+    if (r) { 
+        closeLogModal(); 
+        loadLogs(); 
+        loadStats();
+        showToast(id ? '✅ Лог обновлён!' : '✅ Лог добавлен!');
+        if (!id) showConfetti(); // Confetti only for new logs
+    } else {
+        showToast('❌ Ошибка сохранения', 'error');
+    }
 }
 
 async function editLog(id) {
@@ -536,6 +765,38 @@ function esc(s) {
     const d = document.createElement('div');
     d.textContent = s;
     return d.innerHTML;
+}
+
+// Toast notifications
+function showToast(message, type = 'success') {
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    if (type === 'error') {
+        toast.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+    }
+    document.body.appendChild(toast);
+    
+    setTimeout(() => toast.classList.add('show'), 10);
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 400);
+    }, 3000);
+}
+
+// Confetti effect
+function showConfetti() {
+    const colors = ['#8b5cf6', '#06b6d4', '#f59e0b', '#10b981', '#ef4444'];
+    for (let i = 0; i < 50; i++) {
+        const confetti = document.createElement('div');
+        confetti.className = 'confetti-piece';
+        confetti.style.left = Math.random() * 100 + 'vw';
+        confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+        confetti.style.animationDelay = Math.random() * 2 + 's';
+        confetti.style.borderRadius = Math.random() > 0.5 ? '50%' : '0';
+        document.body.appendChild(confetti);
+        setTimeout(() => confetti.remove(), 5000);
+    }
 }
 
 // Init

@@ -510,8 +510,79 @@ async def set_tag(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
 
 
+from datetime import datetime, timedelta
+
+# ========== УТРЕННИЕ УВЕДОМЛЕНИЯ ==========
+
+async def send_morning_notifications():
+    """Отправить утренние уведомления о проверках"""
+    logging.info("📬 Отправка утренних уведомлений...")
+    
+    for telegram_id, user in authorized_users.items():
+        try:
+            # Получаем проверки на сегодня
+            logs = await api_req("GET", "/api/bot/reminders/today", None, user)
+            
+            if logs and len(logs) > 0:
+                txt = f"🌅 *Доброе утро!*\n\n🔔 Сегодня {len(logs)} проверок:\n\n"
+                for log in logs[:5]:
+                    txt += f"• №{log['log_number']} — {log.get('balance', '—')}\n"
+                if len(logs) > 5:
+                    txt += f"\n...и ещё {len(logs) - 5}"
+                txt += "\n\nУдачного дня! 💪"
+                
+                await bot.send_message(telegram_id, txt, parse_mode="Markdown")
+                logging.info(f"✅ Уведомление отправлено {telegram_id}")
+        except Exception as e:
+            logging.error(f"Ошибка уведомления {telegram_id}: {e}")
+
+
+async def send_evening_report():
+    """Отправить вечерний отчёт"""
+    logging.info("📊 Отправка вечерних отчётов...")
+    
+    for telegram_id, user in authorized_users.items():
+        try:
+            logs = await api_req("GET", "/api/bot/logs", {"limit": 1000}, user) or []
+            
+            # Подсчитываем логи за сегодня
+            today = datetime.now().date()
+            today_logs = [l for l in logs if l.get('created_at', '').startswith(str(today))]
+            
+            if len(today_logs) > 0 or len(logs) > 0:
+                txt = (f"🌙 *Итоги дня*\n\n"
+                       f"📝 Добавлено сегодня: *{len(today_logs)}*\n"
+                       f"📊 Всего логов: *{len(logs)}*\n\n"
+                       f"Отличная работа! 🎉")
+                
+                await bot.send_message(telegram_id, txt, parse_mode="Markdown")
+        except Exception as e:
+            logging.error(f"Ошибка вечернего отчёта {telegram_id}: {e}")
+
+
+async def scheduler():
+    """Планировщик уведомлений"""
+    while True:
+        now = datetime.now()
+        
+        # Утренние уведомления в 9:00
+        if now.hour == 9 and now.minute == 0:
+            await send_morning_notifications()
+        
+        # Вечерние отчёты в 21:00
+        if now.hour == 21 and now.minute == 0:
+            await send_evening_report()
+        
+        # Ждём 60 секунд
+        await asyncio.sleep(60)
+
+
 async def main():
     logging.info("🤖 Бот запущен!")
+    
+    # Запускаем планировщик в фоне
+    asyncio.create_task(scheduler())
+    
     await dp.start_polling(bot)
 
 

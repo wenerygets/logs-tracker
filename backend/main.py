@@ -414,13 +414,26 @@ async def get_stats(user: User = Depends(get_current_user), db: AsyncSession = D
             if today_day in days or tomorrow_day in days:
                 today_checks += 1
     
+    # Статистика по дням (последние 7 дней)
+    daily_stats = []
+    for i in range(6, -1, -1):
+        day = (datetime.now() - timedelta(days=i)).date()
+        day_query = select(func.count(Log.id)).where(
+            func.date(Log.created_at) == day
+        )
+        if user.role == UserRole.WORKER and user.worker_id:
+            day_query = day_query.where(Log.worker_id == user.worker_id)
+        count = (await db.execute(day_query)).scalar() or 0
+        daily_stats.append(count)
+    
     return {
         "total_logs": total_logs,
         "total_workers": total_workers if user.role == UserRole.ADMIN else 1,
         "total_balance": "—",
         "by_tag": by_tag,
         "workers_stats": workers_stats,
-        "today_checks": today_checks
+        "today_checks": today_checks,
+        "daily_stats": daily_stats
     }
 
 
