@@ -489,6 +489,56 @@ async def bulk_change_tag(data: dict, user: User = Depends(get_current_user), db
     return {"ok": True, "updated": count}
 
 
+# ==================== PIN & DUPLICATE ====================
+
+@app.post("/api/logs/{log_id}/pin")
+async def pin_log(log_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Закрепить/открепить лог"""
+    result = await db.execute(select(Log).where(Log.id == log_id))
+    log = result.scalar_one_or_none()
+    if not log:
+        raise HTTPException(status_code=404, detail="Лог не найден")
+    
+    if user.role == UserRole.WORKER and user.worker_id != log.worker_id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    
+    log.is_pinned = not log.is_pinned
+    await db.commit()
+    return {"ok": True, "is_pinned": log.is_pinned}
+
+
+@app.post("/api/logs/{log_id}/duplicate")
+async def duplicate_log(log_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Дублировать лог"""
+    result = await db.execute(select(Log).options(selectinload(Log.worker)).where(Log.id == log_id))
+    original = result.scalar_one_or_none()
+    if not original:
+        raise HTTPException(status_code=404, detail="Лог не найден")
+    
+    if user.role == UserRole.WORKER and user.worker_id != original.worker_id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    
+    new_log = Log(
+        worker_id=original.worker_id,
+        log_number=f"{original.log_number}_copy",
+        balance=original.balance,
+        profit=original.profit,
+        owner=original.owner,
+        install_date=original.install_date,
+        check_date=original.check_date,
+        tag=original.tag,
+        comment=original.comment
+    )
+    db.add(new_log)
+    await db.commit()
+    
+    # XP за новый лог
+    await add_xp(db, new_log.worker_id, 10)
+    
+    result = await db.execute(select(Log).options(selectinload(Log.worker)).where(Log.id == new_log.id))
+    return result.scalar_one().to_dict()
+
+
 @app.delete("/api/logs/{log_id}")
 async def delete_log(log_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Log).where(Log.id == log_id))
@@ -711,6 +761,79 @@ async def get_users(user: User = Depends(get_current_user), db: AsyncSession = D
     
     result = await db.execute(select(User).options(selectinload(User.worker)))
     return [u.to_dict() for u in result.scalars().all()]
+
+
+# ==================== ACHIEVEMENTS & LEADERBOARD ====================
+
+ACHIEVEMENTS = {
+    "first_log": {"name": "Первый лог", "icon": "🎯", "desc": "Добавить первый лог"},
+    "logs_10": {"name": "Десятка", "icon": "🔟", "desc": "10 логов"},
+    "logs_50": {"name": "Полтинник", "icon": "5️⃣0️⃣", "desc": "50 логов"},
+    "logs_100": {"name": "Сотня", "icon": "💯", "desc": "100 логов"},
+    "streak_3": {"name": "Три дня", "icon": "🔥", "desc": "3 дня подряд"},
+    "streak_7": {"name": "Неделя", "icon": "⚡", "desc": "7 дней подряд"},
+    "streak_30": {"name": "Месяц огня", "icon": "🏆", "desc": "30 дней подряд"},
+    "profit_king": {"name": "Профит-кинг", "icon": "👑", "desc": "Максимальный профит"},
+    "early_bird": {"name": "Ранняя пташка", "icon": "🐦", "desc": "Лог до 9 утра"},
+    "night_owl": {"name": "Ночная сова", "icon": "🦉", "desc": "Лог после 23:00"},
+}
+
+
+@app.get("/api/achievements")
+async def get_achievements(user: User = Depends(get_current_user)):
+    """Список всех ачивок"""
+    return ACHIEVEMENTS
+
+
+@app.get("/api/leaderboard/weekly")
+async def get_weekly_leaderboard(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Топ воркеров за неделю"""
+    today = datetime.now().date()
+    week_start = today - timedelta(days=today.weekday())
+    
+    result = await db.execute(select(Worker).options(selectinload(Worker.logs)))
+    workers = result.scalars().all()
+    
+    leaderboard = []
+    for w in workers:
+        week_logs = sum(1 for log in w.logs 
+                       if log.created_at and log.created_at.date() >= week_start and not log.is_archived)
+        if week_logs > 0:
+            leaderboard.append({
+                "id": w.id,
+                "name": w.name,
+                "count": week_logs,
+                "xp": w.xp or 0,
+                "level": w.level or 1,
+                "streak": w.streak or 0
+            })
+    
+    return sorted(leaderboard, key=lambda x: (-x["count"], -x["xp"]))
+
+
+@app.get("/api/leaderboard/monthly")
+async def get_monthly_leaderboard(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Топ воркеров за месяц"""
+    today = datetime.now().date()
+    month_start = today.replace(day=1)
+    
+    result = await db.execute(select(Worker).options(selectinload(Worker.logs)))
+    workers = result.scalars().all()
+    
+    leaderboard = []
+    for w in workers:
+        month_logs = sum(1 for log in w.logs 
+                        if log.created_at and log.created_at.date() >= month_start and not log.is_archived)
+        if month_logs > 0:
+            leaderboard.append({
+                "id": w.id,
+                "name": w.name,
+                "count": month_logs,
+                "goal": w.monthly_goal or 60,
+                "percent": round((month_logs / (w.monthly_goal or 60)) * 100)
+            })
+    
+    return sorted(leaderboard, key=lambda x: -x["count"])
 
 
 # ==================== AUDIT LOG ====================

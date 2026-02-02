@@ -48,10 +48,10 @@ TAG_LABELS = {
 
 def main_kb():
     return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="➕ Добавить лог")],
-        [KeyboardButton(text="📋 Мои логи"), KeyboardButton(text="📊 Статистика")],
-        [KeyboardButton(text="🔔 Проверки сегодня"), KeyboardButton(text="🔍 Поиск")],
-        [KeyboardButton(text="🚪 Выйти")]
+        [KeyboardButton(text="➕ Добавить лог"), KeyboardButton(text="📋 Мои логи")],
+        [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="🏆 Топ недели")],
+        [KeyboardButton(text="🔔 Проверки"), KeyboardButton(text="🔍 Поиск")],
+        [KeyboardButton(text="🎯 Мой прогресс"), KeyboardButton(text="🚪 Выйти")]
     ], resize_keyboard=True)
 
 
@@ -430,8 +430,24 @@ async def show_stats(msg: types.Message):
         if tag in by_tag:
             by_tag[tag] += 1
     
+    # Считаем профит
+    total_profit = 0
+    for log in logs:
+        if log.get('profit'):
+            try:
+                p = log['profit'].lower().replace(' ', '')
+                if 'кк' in p:
+                    total_profit += float(p.replace('кк', '')) * 1000
+                elif 'к' in p:
+                    total_profit += float(p.replace('к', ''))
+            except:
+                pass
+    
+    profit_str = f"{total_profit/1000:.1f}кк" if total_profit >= 1000 else f"{total_profit:.0f}к"
+    
     txt = (f"📊 *Моя статистика*\n\n"
-           f"📝 Всего логов: *{len(logs)}*\n\n"
+           f"📝 Всего логов: *{len(logs)}*\n"
+           f"💰 Общий профит: *{profit_str}*\n\n"
            f"*По тегам:*\n"
            f"  🔥 Жир: {by_tag.get('fat', 0)}\n"
            f"  💸 Нищий: {by_tag.get('poor', 0)}\n"
@@ -441,9 +457,76 @@ async def show_stats(msg: types.Message):
     await msg.answer(txt, parse_mode="Markdown")
 
 
-# ========== ПРОВЕРКИ СЕГОДНЯ ==========
+# ========== ТОП НЕДЕЛИ ==========
 
-@dp.message(F.text == "🔔 Проверки сегодня")
+@dp.message(F.text == "🏆 Топ недели")
+async def show_top(msg: types.Message):
+    user = await require_auth(msg)
+    if not user:
+        return
+    
+    data = await api_req("GET", "/api/bot/workers")
+    if not data:
+        await msg.answer("❌ Не удалось загрузить данные")
+        return
+    
+    txt = "🏆 *Топ воркеров за неделю*\n\n"
+    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"]
+    
+    # Сортируем по количеству логов (logs_count)
+    sorted_workers = sorted(data, key=lambda x: x.get('logs_count', 0), reverse=True)
+    
+    for i, w in enumerate(sorted_workers[:8]):
+        medal = medals[i] if i < len(medals) else f"{i+1}."
+        txt += f"{medal} *{w['name']}* — {w.get('logs_count', 0)} логов\n"
+    
+    await msg.answer(txt, parse_mode="Markdown")
+
+
+# ========== МОЙ ПРОГРЕСС ==========
+
+@dp.message(F.text == "🎯 Мой прогресс")
+async def show_progress(msg: types.Message):
+    user = await require_auth(msg)
+    if not user:
+        return
+    
+    logs = await api_req("GET", "/api/bot/logs", {"limit": 1000}, user) or []
+    
+    # Считаем за сегодня и неделю
+    today = datetime.now().date()
+    week_start = today - timedelta(days=today.weekday())
+    
+    today_logs = sum(1 for l in logs if l.get('created_at', '').startswith(str(today)))
+    week_logs = sum(1 for l in logs if l.get('created_at', '')[:10] >= str(week_start))
+    
+    daily_goal = 3
+    weekly_goal = 15
+    
+    # Прогресс-бары
+    daily_progress = min(today_logs / daily_goal, 1)
+    weekly_progress = min(week_logs / weekly_goal, 1)
+    
+    def progress_bar(progress):
+        filled = int(progress * 10)
+        return "█" * filled + "░" * (10 - filled)
+    
+    daily_emoji = "✅" if today_logs >= daily_goal else "⏳"
+    weekly_emoji = "✅" if week_logs >= weekly_goal else "⏳"
+    
+    txt = (f"🎯 *Мой прогресс*\n\n"
+           f"*Сегодня:* {daily_emoji}\n"
+           f"`{progress_bar(daily_progress)}` {today_logs}/{daily_goal}\n\n"
+           f"*За неделю:* {weekly_emoji}\n"
+           f"`{progress_bar(weekly_progress)}` {week_logs}/{weekly_goal}\n\n"
+           f"📈 Всего логов: *{len(logs)}*")
+    
+    await msg.answer(txt, parse_mode="Markdown")
+
+
+# ========== ПРОВЕРКИ ==========
+
+@dp.message(F.text.in_(["🔔 Проверки", "🔔 Проверки сегодня"]))
 async def show_today(msg: types.Message):
     user = await require_auth(msg)
     if not user:

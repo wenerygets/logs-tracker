@@ -15,6 +15,8 @@ def migrate():
     log_columns = [
         ("profit", "VARCHAR(50)"),
         ("is_archived", "BOOLEAN DEFAULT 0"),
+        ("is_pinned", "BOOLEAN DEFAULT 0"),
+        ("deadline", "VARCHAR(20)"),
     ]
     
     for col_name, col_type in log_columns:
@@ -34,6 +36,9 @@ def migrate():
         ("monthly_goal", "INTEGER DEFAULT 60"),
         ("xp", "INTEGER DEFAULT 0"),
         ("level", "INTEGER DEFAULT 1"),
+        ("streak", "INTEGER DEFAULT 0"),
+        ("best_streak", "INTEGER DEFAULT 0"),
+        ("achievements", "TEXT"),
     ]
     
     for col_name, col_type in worker_columns:

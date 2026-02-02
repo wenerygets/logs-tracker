@@ -70,6 +70,9 @@ class Worker(Base):
     monthly_goal = Column(Integer, default=60)  # Месячный план
     xp = Column(Integer, default=0)  # Опыт
     level = Column(Integer, default=1)  # Уровень
+    streak = Column(Integer, default=0)  # Дни подряд с выполненным планом
+    best_streak = Column(Integer, default=0)  # Лучший streak
+    achievements = Column(Text, nullable=True)  # JSON с ачивками
     created_at = Column(DateTime, default=func.now())
 
     logs = relationship("Log", back_populates="worker", cascade="all, delete-orphan")
@@ -86,6 +89,9 @@ class Worker(Base):
             "monthly_goal": self.monthly_goal,
             "xp": self.xp,
             "level": self.level,
+            "streak": self.streak,
+            "best_streak": self.best_streak,
+            "achievements": self.achievements,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "logs_count": len(self.logs) if self.logs else 0
         }
@@ -150,6 +156,8 @@ class Log(Base):
     check_date = Column(String(20), nullable=True)
     tag = Column(SQLEnum(LogTag), default=LogTag.MEDIUM)
     is_archived = Column(Boolean, default=False)  # Для архива
+    is_pinned = Column(Boolean, default=False)  # Закреплённый
+    deadline = Column(String(20), nullable=True)  # Дедлайн
 
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
@@ -175,6 +183,8 @@ class Log(Base):
             "check_date": self.check_date,
             "tag": tag_value,
             "is_archived": self.is_archived,
+            "is_pinned": self.is_pinned,
+            "deadline": self.deadline,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

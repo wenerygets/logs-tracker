@@ -1187,6 +1187,29 @@ body {
     text-decoration-color: var(--text-muted);
 }
 
+.logs-table tr.pinned {
+    background: linear-gradient(135deg, rgba(251, 191, 36, 0.1) 0%, rgba(245, 158, 11, 0.05) 100%) !important;
+    border-left: 3px solid #fbbf24;
+}
+
+/* ============ SORTABLE HEADERS ============ */
+.logs-table th.sortable {
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.2s ease;
+}
+
+.logs-table th.sortable:hover {
+    color: var(--accent);
+    background: rgba(139, 92, 246, 0.1);
+}
+
+.logs-table th.sortable::after {
+    content: ' ↕';
+    opacity: 0.3;
+    font-size: 10px;
+}
+
 /* ============ WORKER LEVELS & XP ============ */
 .worker-level {
     font-size: 12px;

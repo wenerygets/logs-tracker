@@ -10,6 +10,10 @@ let tagsChart = null;
 // Selection for bulk actions
 let selectedLogs = new Set();
 
+// Sorting
+let sortColumn = null;
+let sortDirection = 'desc';
+
 // ============ THEME ============
 
 function toggleTheme() {
@@ -203,7 +207,11 @@ async function loadWorkers() {
 }
 
 async function loadLogs(filters = {}) {
+    const profitFilter = filters.profit_filter;
+    delete filters.profit_filter;
+    
     logs = await api('GET', '/api/logs', filters) || [];
+    logs = filterLogsByProfit(logs, profitFilter);
     renderLogsTable();
 }
 
@@ -596,6 +604,16 @@ function editLogFromDetails(logId) {
     if (log) openLogModal(log);
 }
 
+function sortLogs(column) {
+    if (sortColumn === column) {
+        sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+        sortColumn = column;
+        sortDirection = 'desc';
+    }
+    renderLogsTable();
+}
+
 function renderLogsTable() {
     const el = document.getElementById('logsTableBody');
     const isAdmin = currentUser.role === 'admin';
@@ -606,8 +624,30 @@ function renderLogsTable() {
         return; 
     }
     
+    // Сортировка: закреплённые всегда сверху
+    let sortedLogs = [...logs].sort((a, b) => {
+        // Закреплённые сверху
+        if (a.is_pinned && !b.is_pinned) return -1;
+        if (!a.is_pinned && b.is_pinned) return 1;
+        
+        // Затем по выбранному столбцу
+        if (sortColumn) {
+            let valA = a[sortColumn] || '';
+            let valB = b[sortColumn] || '';
+            
+            if (typeof valA === 'string') valA = valA.toLowerCase();
+            if (typeof valB === 'string') valB = valB.toLowerCase();
+            
+            if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+            if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+        }
+        return 0;
+    });
+    
+    logs = sortedLogs;
+    
     el.innerHTML = logs.map(l => `
-        <tr class="${selectedLogs.has(l.id) ? 'selected' : ''} ${l.is_archived ? 'archived' : ''}">
+        <tr class="${selectedLogs.has(l.id) ? 'selected' : ''} ${l.is_archived ? 'archived' : ''} ${l.is_pinned ? 'pinned' : ''}">
             <td><input type="checkbox" class="log-checkbox" data-id="${l.id}" ${selectedLogs.has(l.id) ? 'checked' : ''} onchange="toggleLogSelect(${l.id})"></td>
             <td class="cell-mono cell-muted">#${l.id}</td>
             ${isAdmin ? `<td><strong>${esc(l.worker_name)}</strong></td>` : ''}
@@ -620,6 +660,8 @@ function renderLogsTable() {
             <td><span class="tag-badge ${l.tag}">${TAG_LABELS[l.tag]||l.tag}</span></td>
             <td>
                 <div class="actions">
+                    <button class="action-btn" onclick="togglePin(${l.id})" title="${l.is_pinned ? 'Открепить' : 'Закрепить'}">${l.is_pinned ? '📌' : '📍'}</button>
+                    <button class="action-btn" onclick="duplicateLog(${l.id})" title="Дублировать">📋</button>
                     <button class="action-btn" onclick="editLog(${l.id})">✏️</button>
                     ${l.is_archived 
                         ? `<button class="action-btn" onclick="unarchiveLog(${l.id})" title="Восстановить">📤</button>`
@@ -953,8 +995,17 @@ function applyFilters() {
         worker_id: document.getElementById('filterWorker').value,
         tag: document.getElementById('filterTag').value,
         date_filter: document.getElementById('filterDate')?.value || '',
-        archived: document.getElementById('filterArchive')?.value || 'false'
+        archived: document.getElementById('filterArchive')?.value || 'false',
+        profit_filter: document.getElementById('filterProfit')?.value || ''
     });
+}
+
+// Фильтрация по профиту на клиенте (после загрузки)
+function filterLogsByProfit(logsArr, profitFilter) {
+    if (!profitFilter) return logsArr;
+    if (profitFilter === 'with') return logsArr.filter(l => l.profit && l.profit.trim());
+    if (profitFilter === 'without') return logsArr.filter(l => !l.profit || !l.profit.trim());
+    return logsArr;
 }
 
 // ============ SELECTION & BULK ACTIONS ============
@@ -1055,6 +1106,26 @@ async function unarchiveLog(id) {
     const result = await api('POST', `/api/logs/${id}/unarchive`);
     if (result?.ok) {
         showToast('📤 Восстановлено');
+        loadLogs();
+        loadStats();
+    }
+}
+
+// ============ PIN & DUPLICATE ============
+
+async function togglePin(id) {
+    const result = await api('POST', `/api/logs/${id}/pin`);
+    if (result?.ok) {
+        showToast(result.is_pinned ? '📌 Закреплено' : '📍 Откреплено');
+        loadLogs();
+    }
+}
+
+async function duplicateLog(id) {
+    const result = await api('POST', `/api/logs/${id}/duplicate`);
+    if (result?.id) {
+        showToast('📋 Лог скопирован!');
+        confetti();
         loadLogs();
         loadStats();
     }
@@ -1182,6 +1253,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('filterTag').addEventListener('change', applyFilters);
     document.getElementById('filterDate')?.addEventListener('change', applyFilters);
     document.getElementById('filterArchive')?.addEventListener('change', applyFilters);
+    document.getElementById('filterProfit')?.addEventListener('change', applyFilters);
     document.getElementById('searchInput').addEventListener('input', handleSearch);
     
     // Tabs

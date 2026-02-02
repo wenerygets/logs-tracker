@@ -203,6 +203,11 @@
                             <option value="false">Активные</option>
                             <option value="true">Архив</option>
                         </select>
+                        <select id="filterProfit">
+                            <option value="">Любой профит</option>
+                            <option value="with">💰 С профитом</option>
+                            <option value="without">❌ Без профита</option>
+                        </select>
                     </div>
                     
                     <!-- Bulk Actions -->
@@ -219,15 +224,15 @@
                             <thead>
                                 <tr>
                                     <th><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
-                                    <th>#</th>
-                                    <th id="thWorker">Воркер</th>
-                                    <th>№ Лога</th>
-                                    <th>Баланс</th>
-                                    <th>Профит</th>
-                                    <th>Владелец</th>
-                                    <th>Установка</th>
-                                    <th>Проверка</th>
-                                    <th>Тег</th>
+                                    <th class="sortable" onclick="sortLogs('id')">#</th>
+                                    <th id="thWorker" class="sortable" onclick="sortLogs('worker_name')">Воркер</th>
+                                    <th class="sortable" onclick="sortLogs('log_number')">№ Лога</th>
+                                    <th class="sortable" onclick="sortLogs('balance')">Баланс</th>
+                                    <th class="sortable" onclick="sortLogs('profit')">Профит</th>
+                                    <th class="sortable" onclick="sortLogs('owner')">Владелец</th>
+                                    <th class="sortable" onclick="sortLogs('install_date')">Установка</th>
+                                    <th class="sortable" onclick="sortLogs('check_date')">Проверка</th>
+                                    <th class="sortable" onclick="sortLogs('tag')">Тег</th>
                                     <th>Действия</th>
                                 </tr>
                             </thead>
