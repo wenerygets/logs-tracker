@@ -1363,20 +1363,34 @@ def parse_geelark_remark(remark: str) -> dict:
         result["owner"] = owner_match.group(1)
         remark = remark.replace(owner_match.group(0), '').strip()
     
-    # 2. Извлекаем баланс (число + к/кк)
-    balance_match = re.search(r'(\d+(?:[.,]\d+)?)\s*(кк|к|k|kk)?', remark, re.IGNORECASE)
+    # 2. Извлекаем баланс (число + ОБЯЗАТЕЛЬНО к/кк/k/kk)
+    # Баланс ДОЛЖЕН иметь суффикс к/кк, иначе это не баланс!
+    balance_match = re.search(r'(\d+(?:[.,]\d+)?)\s*(кк|к|k|kk)', remark, re.IGNORECASE)
     if balance_match:
         balance_num = balance_match.group(1)
-        balance_suffix = balance_match.group(2) or ''
-        result["balance"] = f"{balance_num}{balance_suffix.lower()}"
+        balance_suffix = balance_match.group(2)
+        # Нормализуем суффикс
+        suffix = balance_suffix.lower().replace('k', 'к')
+        result["balance"] = f"{balance_num}{suffix}"
         remark = remark.replace(balance_match.group(0), '').strip()
     
-    # 3. Извлекаем теги
+    # 3. Извлекаем даты проверки СНАЧАЛА (числа через дефис: 5-20-22-26)
+    # Это важно делать ДО поиска тегов, чтобы не потерять даты
+    check_date_match = re.search(r'(\d{1,2}(?:\s*-\s*\d{1,2})+)', remark)
+    if check_date_match:
+        dates_str = check_date_match.group(1).replace(' ', '')
+        # Проверяем что это даты (числа от 1 до 31)
+        dates = [d for d in dates_str.split('-') if d.isdigit() and 1 <= int(d) <= 31]
+        if len(dates) >= 2:  # Минимум 2 даты чтобы это считалось датами проверки
+            result["check_date"] = "-".join(dates)
+            remark = remark.replace(check_date_match.group(0), '').strip()
+    
+    # 4. Извлекаем теги
     tag_patterns = {
-        "poor": [r'без\s*зп', r'безз', r'нищий', r'нищ', r'пустой'],
-        "fat": [r'жир', r'жирн', r'топ', r'🔥'],
-        "salary": [r'есть\s*зп', r'зп\s*есть', r'зарплата', r'💰'],
-        "medium": [r'средний', r'норм', r'📊']
+        "poor": [r'без\s*зп', r'безз', r'бзп', r'нищий', r'нищ', r'пустой', r'\dп\b', r'\d\s*п\b'],
+        "fat": [r'жир', r'жирн', r'топ', r'🔥', r'фат'],
+        "salary": [r'есть\s*зп', r'зп\s*есть', r'зарплата', r'💰', r'езп'],
+        "medium": [r'средний', r'норм', r'📊', r'срд']
     }
     
     remark_lower = remark.lower()
@@ -1389,17 +1403,6 @@ def parse_geelark_remark(remark: str) -> dict:
                 break
         if result["tag"] != "medium":
             break
-    
-    # 4. Извлекаем даты проверки (числа через дефис в конце или отдельно)
-    # Ищем паттерн типа -5-10-15 или 5-10-15
-    check_date_match = re.search(r'[\-\s]?(\d{1,2}(?:-\d{1,2})+)', remark)
-    if check_date_match:
-        dates_str = check_date_match.group(1)
-        # Проверяем что это даты (числа от 1 до 31)
-        dates = [d for d in dates_str.split('-') if d.isdigit() and 1 <= int(d) <= 31]
-        if dates:
-            result["check_date"] = "-".join(dates)
-            remark = remark.replace(check_date_match.group(0), '').strip()
     
     # 5. Остаток — комментарий
     # Очищаем лишние пробелы и дефисы
