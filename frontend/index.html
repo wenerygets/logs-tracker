@@ -97,6 +97,7 @@
                 </div>
                 <div class="header-right">
                     <input type="text" id="searchInput" placeholder="🔍 Поиск...">
+                    <button class="btn btn-secondary" onclick="generatePDFReport()" title="PDF отчёт">📄</button>
                     <button class="btn btn-secondary" id="exportBtn" onclick="exportToExcel()" title="Экспорт в Excel">📥</button>
                     <button class="btn btn-primary" id="addLogBtn">➕ Добавить лог</button>
                 </div>
@@ -167,6 +168,10 @@
                         <div class="card">
                             <h3>🔔 Проверки (сегодня/завтра)</h3>
                             <div id="upcomingChecks"></div>
+                        </div>
+                        <div class="card" id="funnelCard">
+                            <h3>📊 Воронка конверсии</h3>
+                            <div id="funnelChart"></div>
                         </div>
                     </div>
 

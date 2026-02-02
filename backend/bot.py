@@ -718,6 +718,58 @@ async def send_check_reminders():
             logging.error(f"Ошибка напоминания {telegram_id}: {e}")
 
 
+async def send_backup_to_admin():
+    """Отправка бэкапа БД админу"""
+    if not ADMIN_CHAT_ID:
+        logging.warning("ADMIN_CHAT_ID не установлен, бэкап не отправлен")
+        return
+    
+    db_path = "logs_leads.db"
+    if not os.path.exists(db_path):
+        logging.error(f"Файл БД не найден: {db_path}")
+        return
+    
+    try:
+        from aiogram.types import FSInputFile
+        backup_file = FSInputFile(db_path, filename=f"backup_{datetime.now().strftime('%Y%m%d_%H%M')}.db")
+        await bot.send_document(
+            int(ADMIN_CHAT_ID),
+            backup_file,
+            caption=f"🗄️ *Автобэкап БД*\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+            parse_mode="Markdown"
+        )
+        logging.info("✅ Бэкап отправлен админу")
+    except Exception as e:
+        logging.error(f"Ошибка отправки бэкапа: {e}")
+
+
+@dp.message(F.text == "/backup")
+async def manual_backup(msg: types.Message):
+    """Ручной бэкап (только админ)"""
+    user = get_user(msg)
+    if not user or user.get('role') != 'admin':
+        await msg.answer("❌ Только для администратора")
+        return
+    
+    await msg.answer("📦 Создаю бэкап...")
+    
+    db_path = "logs_leads.db"
+    if not os.path.exists(db_path):
+        await msg.answer("❌ Файл БД не найден")
+        return
+    
+    try:
+        from aiogram.types import FSInputFile
+        backup_file = FSInputFile(db_path, filename=f"backup_{datetime.now().strftime('%Y%m%d_%H%M')}.db")
+        await msg.answer_document(
+            backup_file,
+            caption=f"🗄️ *Бэкап БД*\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        await msg.answer(f"❌ Ошибка: {e}")
+
+
 async def scheduler():
     """Планировщик уведомлений"""
     while True:
@@ -738,6 +790,10 @@ async def scheduler():
         # Вечерние отчёты в 21:00
         if now.hour == 21 and now.minute == 0:
             await send_evening_report()
+        
+        # Автобэкап каждый день в 3:00
+        if now.hour == 3 and now.minute == 0:
+            await send_backup_to_admin()
         
         # Ждём 60 секунд
         await asyncio.sleep(60)

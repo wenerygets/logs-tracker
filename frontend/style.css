@@ -1474,6 +1474,56 @@ body.light-theme .logs-table tr:hover {
     }
 }
 
+/* ============ FUNNEL ============ */
+#funnelChart {
+    padding: 10px 0;
+}
+
+.funnel-item {
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: center;
+}
+
+.funnel-bar {
+    background: linear-gradient(90deg, var(--funnel-color), rgba(139, 92, 246, 0.3));
+    border-radius: 8px;
+    padding: 12px 15px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.3s ease;
+    border: 1px solid var(--funnel-color);
+}
+
+.funnel-bar:hover {
+    transform: scale(1.02);
+    box-shadow: 0 0 15px var(--funnel-color);
+}
+
+.funnel-icon {
+    font-size: 18px;
+}
+
+.funnel-name {
+    flex: 1;
+    font-weight: 600;
+    color: white;
+}
+
+.funnel-count {
+    font-weight: 700;
+    font-size: 18px;
+    color: white;
+}
+
+.funnel-percent {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    min-width: 35px;
+    text-align: right;
+}
+
 /* ============ TAG BADGE ============ */
 .tag-badge {
     display: inline-block;

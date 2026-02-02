@@ -191,6 +191,7 @@ async function loadStats() {
     }
     renderTagBars(stats.by_tag);
     renderLogsChart(stats.daily_stats);
+    renderFunnel(stats.by_tag);
     if (currentUser.role === 'admin') {
         renderWorkersWithPlan(stats.workers_stats || []);
         renderLeaderboard(stats.workers_stats || []);
@@ -381,6 +382,44 @@ function renderTagsChart(byTag) {
     });
 }
 
+// ============ FUNNEL ============
+
+function renderFunnel(byTag) {
+    const el = document.getElementById('funnelChart');
+    if (!el) return;
+    
+    if (!byTag || Object.values(byTag).every(v => v === 0)) {
+        el.innerHTML = '<div class="empty-state">Нет данных</div>';
+        return;
+    }
+    
+    // Сортируем по "воронке": Нищий -> Средний -> Есть ЗП -> Жир
+    const funnelData = [
+        { key: 'poor', name: 'Нищий', color: '#a855f7', icon: '💸' },
+        { key: 'medium', name: 'Средний', color: '#3b82f6', icon: '📊' },
+        { key: 'salary', name: 'Есть ЗП', color: '#22c55e', icon: '💰' },
+        { key: 'fat', name: 'Жир', color: '#ef4444', icon: '🔥' },
+    ];
+    
+    const total = Object.values(byTag).reduce((a, b) => a + b, 0) || 1;
+    
+    el.innerHTML = funnelData.map((item, idx) => {
+        const count = byTag[item.key] || 0;
+        const percent = Math.round((count / total) * 100);
+        const width = Math.max(20, 100 - (idx * 15)); // Сужающаяся воронка
+        
+        return `
+        <div class="funnel-item" style="--funnel-color: ${item.color}; --funnel-width: ${width}%">
+            <div class="funnel-bar" style="width: ${width}%">
+                <span class="funnel-icon">${item.icon}</span>
+                <span class="funnel-name">${item.name}</span>
+                <span class="funnel-count">${count}</span>
+                <span class="funnel-percent">${percent}%</span>
+            </div>
+        </div>`;
+    }).join('');
+}
+
 // ============ LEADERBOARD ============
 
 function renderLeaderboard(workersStats) {
@@ -413,6 +452,111 @@ function renderLeaderboard(workersStats) {
             <div class="leaderboard-count">${w.total}</div>
         </div>`;
     }).join('');
+}
+
+// ============ PDF REPORT ============
+
+async function generatePDFReport() {
+    const statsData = await api('GET', '/api/stats');
+    if (!statsData) {
+        showToast('❌ Ошибка загрузки данных', 'error');
+        return;
+    }
+    
+    const today = new Date().toLocaleDateString('ru-RU');
+    
+    // Создаём HTML отчёт
+    const html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Отчёт Logs TRF.404 - ${today}</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 40px; background: white; color: #1e293b; }
+        h1 { color: #8b5cf6; border-bottom: 3px solid #8b5cf6; padding-bottom: 10px; }
+        h2 { color: #475569; margin-top: 30px; }
+        .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 20px 0; }
+        .stat-box { background: #f8fafc; padding: 20px; border-radius: 10px; text-align: center; border: 1px solid #e2e8f0; }
+        .stat-value { font-size: 32px; font-weight: bold; color: #8b5cf6; }
+        .stat-label { color: #64748b; font-size: 14px; }
+        .workers-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        .workers-table th, .workers-table td { border: 1px solid #e2e8f0; padding: 12px; text-align: left; }
+        .workers-table th { background: #f8fafc; font-weight: 600; }
+        .workers-table tr:nth-child(even) { background: #f8fafc; }
+        .footer { margin-top: 40px; text-align: center; color: #94a3b8; font-size: 12px; }
+        @media print { body { padding: 20px; } }
+    </style>
+</head>
+<body>
+    <h1>📊 Отчёт Logs TRF.404</h1>
+    <p>Дата: <strong>${today}</strong></p>
+    
+    <div class="stat-grid">
+        <div class="stat-box">
+            <div class="stat-value">${statsData.total_logs || 0}</div>
+            <div class="stat-label">Всего логов</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-value">${statsData.total_workers || 0}</div>
+            <div class="stat-label">Воркеров</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-value">${statsData.today_checks || 0}</div>
+            <div class="stat-label">Проверок сегодня</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-value">${statsData.total_profit || '0'}</div>
+            <div class="stat-label">Общий профит</div>
+        </div>
+    </div>
+    
+    <h2>👥 Статистика по воркерам</h2>
+    <table class="workers-table">
+        <tr>
+            <th>Воркер</th>
+            <th>Сегодня</th>
+            <th>Неделя</th>
+            <th>Всего</th>
+            <th>План</th>
+        </tr>
+        ${(statsData.workers_stats || []).map(w => `
+        <tr>
+            <td>${w.name}</td>
+            <td>${w.today || 0}</td>
+            <td>${w.week || 0}</td>
+            <td>${w.total || 0}</td>
+            <td>${w.today || 0}/${w.daily_goal || 3}</td>
+        </tr>
+        `).join('')}
+    </table>
+    
+    <h2>🏷️ Распределение по тегам</h2>
+    <table class="workers-table">
+        <tr><th>Тег</th><th>Количество</th></tr>
+        <tr><td>🔥 Жир</td><td>${statsData.by_tag?.fat || 0}</td></tr>
+        <tr><td>💸 Нищий</td><td>${statsData.by_tag?.poor || 0}</td></tr>
+        <tr><td>📊 Средний</td><td>${statsData.by_tag?.medium || 0}</td></tr>
+        <tr><td>💰 Есть ЗП</td><td>${statsData.by_tag?.salary || 0}</td></tr>
+    </table>
+    
+    <div class="footer">
+        Сгенерировано системой Logs TRF.404 | ${today}
+    </div>
+</body>
+</html>`;
+    
+    // Открываем в новом окне для печати
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(html);
+    printWindow.document.close();
+    
+    // Автоматически открываем диалог печати
+    setTimeout(() => {
+        printWindow.print();
+    }, 500);
+    
+    showToast('📄 Отчёт готов к печати!');
 }
 
 // ============ EXPORT TO EXCEL ============
