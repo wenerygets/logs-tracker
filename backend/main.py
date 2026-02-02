@@ -1556,6 +1556,10 @@ async def sync_geelark(data: dict = None, user: User = Depends(get_current_user)
     mappings_result = await db.execute(select(GeelarkGroupMapping))
     group_mappings = {m.geelark_group_id: m.worker_id for m in mappings_result.scalars().all()}
     
+    # Получаем всех воркеров для автоматического маппинга по имени
+    workers_result = await db.execute(select(Worker))
+    workers_by_name = {w.name.lower().strip(): w.id for w in workers_result.scalars().all()}
+    
     # Получаем уже синхронизированные телефоны
     synced_result = await db.execute(select(GeelarkSyncedPhone))
     synced_phones = {s.geelark_phone_id: s for s in synced_result.scalars().all()}
@@ -1580,21 +1584,27 @@ async def sync_geelark(data: dict = None, user: User = Depends(get_current_user)
         
         worker_id = None
         
-        # 1. Сначала проверяем маппинг группы
+        # 1. Сначала проверяем маппинг группы по ID
         if group_id and group_id in group_mappings:
             worker_id = group_mappings[group_id]
         
-        # 2. Если нет маппинга — используем воркера по умолчанию
+        # 2. Автоматический маппинг по имени группы = имени воркера
+        if not worker_id and group_name:
+            group_name_lower = group_name.lower().strip()
+            if group_name_lower in workers_by_name:
+                worker_id = workers_by_name[group_name_lower]
+        
+        # 3. Если нет маппинга — используем воркера по умолчанию
         if not worker_id and settings.default_worker_id:
             worker_id = settings.default_worker_id
         
         # Собираем новые группы (для информации)
-        if group_id and group_id not in group_mappings:
+        if group_id and group_id not in group_mappings and not worker_id:
             new_groups.add((group_id, group_name))
         
         # Если воркер не определён — пропускаем
         if not worker_id:
-            errors.append(f"Телефон {phone.get('serialNo')}: выберите воркера по умолчанию")
+            errors.append(f"Телефон {phone.get('serialNo')}: группа '{group_name}' не найдена")
             continue
         
         # Парсим данные
