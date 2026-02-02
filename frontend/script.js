@@ -691,11 +691,11 @@ function renderWorkersGrid() {
     const el = document.getElementById('workersGrid');
     if (!workers?.length) { el.innerHTML = '<div class="empty-state">Нет воркеров</div>'; return; }
     el.innerHTML = workers.map(w => `
-        <div class="worker-card">
+        <div class="worker-card clickable" onclick="viewWorkerLogs(${w.id}, '${esc(w.name)}')">
             <div class="worker-card-header">
                 <span class="worker-card-name">👤 ${esc(w.name)}</span>
                 <span class="worker-level">⭐ Ур.${w.level || 1}</span>
-                <div class="actions">
+                <div class="actions" onclick="event.stopPropagation()">
                     <button class="action-btn" onclick="editWorker(${w.id})">✏️</button>
                     <button class="action-btn" onclick="deleteWorker(${w.id})">🗑️</button>
                 </div>
