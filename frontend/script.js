@@ -1628,6 +1628,7 @@ async function syncGeelark() {
             📊 Всего телефонов: ${result.total_phones}<br>
             ✅ Импортировано: ${result.imported}<br>
             ⏭️ Пропущено: ${result.skipped}
+            ${result.archived ? `<br>📦 Архивировано: ${result.archived}` : ''}
             ${errorsHtml}
         `;
         

@@ -1676,6 +1676,21 @@ async def sync_geelark(data: dict = None, user: User = Depends(get_current_user)
         except Exception as e:
             errors.append(f"Телефон {serial_no}: {str(e)}")
     
+    # Проверяем удалённые профили — архивируем логи
+    archived_count = 0
+    geelark_phone_ids = {p.get("id") for p in phones if p.get("id")}
+    
+    # Получаем все синхронизированные телефоны
+    all_synced = await db.execute(select(GeelarkSyncedPhone).options(selectinload(GeelarkSyncedPhone.log)))
+    for synced in all_synced.scalars().all():
+        # Если телефона больше нет в Geelark — архивируем лог
+        if synced.geelark_phone_id not in geelark_phone_ids:
+            if synced.log and not synced.log.is_archived:
+                synced.log.is_archived = True
+                archived_count += 1
+            # Удаляем запись о синхронизации
+            await db.delete(synced)
+    
     # Обновляем время синхронизации
     settings.last_sync_at = datetime.now()
     await db.commit()
@@ -1684,6 +1699,7 @@ async def sync_geelark(data: dict = None, user: User = Depends(get_current_user)
         "ok": True,
         "imported": imported,
         "skipped": skipped,
+        "archived": archived_count,
         "total_phones": len(phones),
         "errors": errors[:10],
         "new_groups": [{"id": g[0], "name": g[1]} for g in new_groups]
