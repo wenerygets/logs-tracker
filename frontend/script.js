@@ -674,14 +674,30 @@ let upcomingChecksData = [];
 
 function renderUpcomingChecks(checks) {
     const el = document.getElementById('upcomingChecks');
-    upcomingChecksData = checks || [];
     
-    if (!checks?.length) { el.innerHTML = '<div class="empty-state">Нет проверок</div>'; return; }
+    if (!checks?.length) { 
+        upcomingChecksData = [];
+        el.innerHTML = '<div class="empty-state">Нет проверок</div>'; 
+        return; 
+    }
     
     const today = new Date().getDate();
     const tomorrow = new Date(Date.now() + 86400000).getDate();
     
-    el.innerHTML = checks.map((l, idx) => {
+    // Фильтруем только логи на сегодня и завтра
+    const filtered = checks.filter(l => {
+        const days = (l.check_date || '').split('-').map(d => parseInt(d.trim())).filter(d => !isNaN(d));
+        return days.includes(today) || days.includes(tomorrow);
+    });
+    
+    upcomingChecksData = filtered;
+    
+    if (!filtered.length) { 
+        el.innerHTML = '<div class="empty-state">Нет проверок на сегодня/завтра</div>'; 
+        return; 
+    }
+    
+    el.innerHTML = filtered.map((l, idx) => {
         // Определяем когда проверка
         const days = (l.check_date || '').split('-').map(d => parseInt(d.trim())).filter(d => !isNaN(d));
         let when = '';
