@@ -1617,11 +1617,18 @@ async function syncGeelark() {
         showConfetti();
         
         // Update stats
+        let errorsHtml = '';
+        if (result.errors?.length) {
+            errorsHtml = `<br>❌ Ошибок: ${result.errors.length}<br><div style="margin-top:10px;padding:10px;background:rgba(239,68,68,0.2);border-radius:8px;font-size:12px;max-height:150px;overflow-y:auto;">`;
+            errorsHtml += result.errors.map(e => `• ${e}`).join('<br>');
+            errorsHtml += '</div>';
+        }
+        
         document.getElementById('geelarkSyncStats').innerHTML = `
             📊 Всего телефонов: ${result.total_phones}<br>
             ✅ Импортировано: ${result.imported}<br>
             ⏭️ Пропущено: ${result.skipped}
-            ${result.errors?.length ? `<br>❌ Ошибок: ${result.errors.length}` : ''}
+            ${errorsHtml}
         `;
         
         document.getElementById('geelarkLastSync').textContent = 'Последняя синхронизация: сейчас';
