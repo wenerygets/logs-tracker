@@ -468,6 +468,23 @@
         </div>
     </div>
 
+    <!-- Log Detail Modal -->
+    <div class="modal-overlay" id="logDetailModal">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h2>📋 Детали лога</h2>
+                <button class="modal-close" onclick="closeLogDetailModal()">×</button>
+            </div>
+            <div class="modal-body" id="logDetailContent">
+                <!-- Content will be injected -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeLogDetailModal()">Закрыть</button>
+                <button class="btn btn-primary" onclick="editLogFromDetail()">✏️ Редактировать</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Notes Modal -->
     <div class="modal-overlay" id="notesModal">
         <div class="modal modal-lg">

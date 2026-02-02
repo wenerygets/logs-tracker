@@ -804,8 +804,8 @@ function renderLogsTable() {
     logs = sortedLogs;
     
     el.innerHTML = logs.map(l => `
-        <tr class="${selectedLogs.has(l.id) ? 'selected' : ''} ${l.is_archived ? 'archived' : ''} ${l.is_pinned ? 'pinned' : ''}">
-            <td><input type="checkbox" class="log-checkbox" data-id="${l.id}" ${selectedLogs.has(l.id) ? 'checked' : ''} onchange="toggleLogSelect(${l.id})"></td>
+        <tr class="${selectedLogs.has(l.id) ? 'selected' : ''} ${l.is_archived ? 'archived' : ''} ${l.is_pinned ? 'pinned' : ''} clickable-row" onclick="openLogDetailModal(${l.id}, event)">
+            <td onclick="event.stopPropagation()"><input type="checkbox" class="log-checkbox" data-id="${l.id}" ${selectedLogs.has(l.id) ? 'checked' : ''} onchange="toggleLogSelect(${l.id})"></td>
             <td class="cell-mono cell-muted">#${l.id}</td>
             ${isAdmin ? `<td><strong>${esc(l.worker_name)}</strong></td>` : ''}
             <td class="cell-mono">${esc(l.log_number)}</td>
@@ -815,7 +815,7 @@ function renderLogsTable() {
             <td class="cell-mono cell-muted">${l.install_date||'—'}</td>
             <td class="cell-mono cell-muted">${l.check_date||'—'}</td>
             <td><span class="tag-badge ${l.tag}">${TAG_LABELS[l.tag]||l.tag}</span></td>
-            <td>
+            <td onclick="event.stopPropagation()">
                 <div class="actions">
                     <button class="action-btn" onclick="openNotesModal(${l.id}, '${esc(l.log_number)}')" title="Заметки">💬</button>
                     <button class="action-btn" onclick="togglePin(${l.id})" title="${l.is_pinned ? 'Открепить' : 'Закрепить'}">${l.is_pinned ? '📌' : '📍'}</button>
@@ -1295,6 +1295,102 @@ async function duplicateLog(id) {
 // ============ NOTES ============
 
 let currentNotesLogId = null;
+let currentDetailLogId = null;
+
+// ============ LOG DETAIL MODAL ============
+
+async function openLogDetailModal(logId, event) {
+    // Не открывать если клик был на кнопке или чекбоксе
+    if (event && (event.target.closest('button') || event.target.closest('input'))) {
+        return;
+    }
+    
+    const log = logs.find(l => l.id === logId);
+    if (!log) return;
+    
+    currentDetailLogId = logId;
+    
+    const content = document.getElementById('logDetailContent');
+    const isAdmin = currentUser?.role === 'admin';
+    
+    content.innerHTML = `
+        <div class="log-detail-grid">
+            <div class="log-detail-item">
+                <label>ID</label>
+                <span>#${log.id}</span>
+            </div>
+            <div class="log-detail-item">
+                <label>№ Лога</label>
+                <span class="log-detail-value">${esc(log.log_number)}</span>
+            </div>
+            <div class="log-detail-item">
+                <label>Воркер</label>
+                <span class="log-detail-value">👤 ${esc(log.worker_name)}</span>
+            </div>
+            <div class="log-detail-item">
+                <label>Баланс</label>
+                <span class="log-detail-value balance-highlight">💰 ${esc(log.balance)}</span>
+            </div>
+            <div class="log-detail-item">
+                <label>Профит</label>
+                <span class="log-detail-value ${log.profit ? 'profit-highlight' : ''}">${log.profit ? '+' + esc(log.profit) : '—'}</span>
+            </div>
+            <div class="log-detail-item">
+                <label>Владелец</label>
+                <span class="log-detail-value">${log.owner ? '@' + esc(log.owner) : '—'}</span>
+            </div>
+            <div class="log-detail-item">
+                <label>Дата установки</label>
+                <span class="log-detail-value">📅 ${log.install_date || '—'}</span>
+            </div>
+            <div class="log-detail-item">
+                <label>Дата проверки</label>
+                <span class="log-detail-value">🔔 ${log.check_date || '—'}</span>
+            </div>
+            <div class="log-detail-item">
+                <label>Тег</label>
+                <span class="tag-badge ${log.tag}">${TAG_LABELS[log.tag] || log.tag}</span>
+            </div>
+            <div class="log-detail-item">
+                <label>Статус</label>
+                <span class="log-detail-value">
+                    ${log.is_pinned ? '📌 Закреплён' : ''}
+                    ${log.is_archived ? '📦 В архиве' : ''}
+                    ${!log.is_pinned && !log.is_archived ? '✅ Активен' : ''}
+                </span>
+            </div>
+            ${log.deadline ? `
+            <div class="log-detail-item">
+                <label>Дедлайн</label>
+                <span class="log-detail-value">⏰ ${log.deadline}</span>
+            </div>
+            ` : ''}
+        </div>
+        ${log.comment ? `
+        <div class="log-detail-comment">
+            <label>Комментарий</label>
+            <p>${esc(log.comment)}</p>
+        </div>
+        ` : ''}
+        <div class="log-detail-meta">
+            Создан: ${formatDate(log.created_at)}
+        </div>
+    `;
+    
+    document.getElementById('logDetailModal').classList.add('active');
+}
+
+function closeLogDetailModal() {
+    document.getElementById('logDetailModal').classList.remove('active');
+    currentDetailLogId = null;
+}
+
+function editLogFromDetail() {
+    if (currentDetailLogId) {
+        closeLogDetailModal();
+        editLog(currentDetailLogId);
+    }
+}
 
 async function openNotesModal(logId, logNumber) {
     currentNotesLogId = logId;

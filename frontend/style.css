@@ -1360,6 +1360,92 @@ body.light-theme .logs-table tr:hover {
     max-width: 600px;
 }
 
+/* Log Detail Modal */
+.log-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.log-detail-item {
+    background: rgba(139, 92, 246, 0.1);
+    border-radius: 10px;
+    padding: 15px;
+    border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.log-detail-item label {
+    display: block;
+    font-size: 0.75rem;
+    color: #7a7a95;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 5px;
+}
+
+.log-detail-value {
+    font-size: 1.1rem;
+    color: #e2e8f0;
+    font-weight: 500;
+}
+
+.log-detail-value.balance-highlight {
+    color: #10b981;
+    font-size: 1.2rem;
+}
+
+.log-detail-value.profit-highlight {
+    color: #22c55e;
+    font-weight: 600;
+}
+
+.log-detail-comment {
+    background: rgba(30, 30, 50, 0.5);
+    border-radius: 10px;
+    padding: 15px;
+    margin-bottom: 15px;
+    border: 1px solid rgba(139, 92, 246, 0.1);
+}
+
+.log-detail-comment label {
+    display: block;
+    font-size: 0.75rem;
+    color: #7a7a95;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 10px;
+}
+
+.log-detail-comment p {
+    color: #e2e8f0;
+    line-height: 1.6;
+    margin: 0;
+}
+
+.log-detail-meta {
+    font-size: 0.8rem;
+    color: #7a7a95;
+    text-align: right;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 15px 25px;
+    border-top: 1px solid rgba(139, 92, 246, 0.1);
+}
+
+.clickable-row {
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.clickable-row:hover {
+    background: rgba(139, 92, 246, 0.15) !important;
+}
+
 .notes-content {
     padding: 20px;
 }
