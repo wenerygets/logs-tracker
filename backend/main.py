@@ -1310,43 +1310,104 @@ async def geelark_request(endpoint: str, data: dict, settings: GeelarkSettings) 
             return await resp.json()
 
 
-def parse_geelark_remark(remark: str) -> tuple:
+def parse_geelark_serial_name(serial_name: str) -> str:
     """
-    Парсит remark из Geelark в баланс и даты проверки
+    Парсит serialName из Geelark — извлекает только дату
     Примеры:
-    - "76к" → balance="76к", check_date=None
-    - "76к-15-25" → balance="76к", check_date="15-25"
-    - "100к-8-24-25-29" → balance="100к", check_date="8-24-25-29"
+    - "01.02 19741" → "01.02"
+    - "02.02" → "02.02"
+    - "15.01 12345 extra" → "15.01"
     """
+    if not serial_name:
+        return "—"
+    
+    serial_name = serial_name.strip()
+    
+    # Ищем дату в формате DD.MM или DD-MM
+    date_match = re.match(r'^(\d{1,2}[.\-/]\d{1,2})', serial_name)
+    if date_match:
+        return date_match.group(1)
+    
+    # Если нет даты, берём первое слово/часть до пробела
+    return serial_name.split()[0] if ' ' in serial_name else serial_name
+
+
+def parse_geelark_remark(remark: str) -> dict:
+    """
+    Парсит remark из Geelark
+    Примеры:
+    - "76к" → balance="76к"
+    - "76к-15-25" → balance="76к", check_date="15-25"
+    - "без зп 15к расходы @evgeniikuzn" → balance="15к", owner="evgeniikuzn", tag="poor", comment="расходы"
+    - "жир 100к @admin -5-10" → balance="100к", owner="admin", tag="fat", check_date="5-10"
+    
+    Returns dict with: balance, check_date, owner, tag, comment
+    """
+    result = {
+        "balance": "0",
+        "check_date": None,
+        "owner": None,
+        "tag": "medium",
+        "comment": None
+    }
+    
     if not remark:
-        return "0", None
+        return result
     
     remark = remark.strip()
+    remaining_parts = []
     
-    # Паттерн: баланс (текст с к/кк) + опционально даты через дефис
-    # Ищем первую часть (баланс) - это всё до первого дефиса с числом после
-    parts = remark.split("-")
+    # 1. Извлекаем @username → owner
+    owner_match = re.search(r'@(\w+)', remark)
+    if owner_match:
+        result["owner"] = owner_match.group(1)
+        remark = remark.replace(owner_match.group(0), '').strip()
     
-    if len(parts) == 1:
-        # Только баланс
-        return remark, None
+    # 2. Извлекаем баланс (число + к/кк)
+    balance_match = re.search(r'(\d+(?:[.,]\d+)?)\s*(кк|к|k|kk)?', remark, re.IGNORECASE)
+    if balance_match:
+        balance_num = balance_match.group(1)
+        balance_suffix = balance_match.group(2) or ''
+        result["balance"] = f"{balance_num}{balance_suffix.lower()}"
+        remark = remark.replace(balance_match.group(0), '').strip()
     
-    # Первая часть - баланс (может содержать к, кк, число)
-    balance = parts[0].strip()
+    # 3. Извлекаем теги
+    tag_patterns = {
+        "poor": [r'без\s*зп', r'безз', r'нищий', r'нищ', r'пустой'],
+        "fat": [r'жир', r'жирн', r'топ', r'🔥'],
+        "salary": [r'есть\s*зп', r'зп\s*есть', r'зарплата', r'💰'],
+        "medium": [r'средний', r'норм', r'📊']
+    }
     
-    # Остальные части - даты (только если это числа)
-    check_parts = []
-    for part in parts[1:]:
-        part = part.strip()
-        if part.isdigit():
-            check_parts.append(part)
-        else:
-            # Если не число, добавляем к комментарию (пропускаем)
-            pass
+    remark_lower = remark.lower()
+    for tag, patterns in tag_patterns.items():
+        for pattern in patterns:
+            if re.search(pattern, remark_lower):
+                result["tag"] = tag
+                # Удаляем найденный тег из строки
+                remark = re.sub(pattern, '', remark, flags=re.IGNORECASE).strip()
+                break
+        if result["tag"] != "medium":
+            break
     
-    check_date = "-".join(check_parts) if check_parts else None
+    # 4. Извлекаем даты проверки (числа через дефис в конце или отдельно)
+    # Ищем паттерн типа -5-10-15 или 5-10-15
+    check_date_match = re.search(r'[\-\s]?(\d{1,2}(?:-\d{1,2})+)', remark)
+    if check_date_match:
+        dates_str = check_date_match.group(1)
+        # Проверяем что это даты (числа от 1 до 31)
+        dates = [d for d in dates_str.split('-') if d.isdigit() and 1 <= int(d) <= 31]
+        if dates:
+            result["check_date"] = "-".join(dates)
+            remark = remark.replace(check_date_match.group(0), '').strip()
     
-    return balance, check_date
+    # 5. Остаток — комментарий
+    # Очищаем лишние пробелы и дефисы
+    remark = re.sub(r'\s+', ' ', remark).strip(' -')
+    if remark:
+        result["comment"] = remark
+    
+    return result
 
 
 @app.get("/api/geelark/settings")
@@ -1530,21 +1591,32 @@ async def sync_geelark(data: dict = None, user: User = Depends(get_current_user)
         
         # Парсим данные
         serial_no = phone.get("serialNo", "")  # Номер лога
-        serial_name = phone.get("serialName", "")  # Дата установки
-        remark = phone.get("remark", "")  # Баланс и даты проверки
+        serial_name = phone.get("serialName", "")  # Дата установки (убираем цифры после даты)
+        remark = phone.get("remark", "")  # Баланс, владелец, тег, комментарий, даты проверки
         
-        balance, check_date = parse_geelark_remark(remark)
+        # Парсим serialName — только дату
+        install_date = parse_geelark_serial_name(serial_name)
+        
+        # Парсим remark — извлекаем всё
+        parsed = parse_geelark_remark(remark)
+        
+        # Определяем тег
+        try:
+            tag = LogTag(parsed["tag"])
+        except ValueError:
+            tag = LogTag.MEDIUM
         
         # Создаём лог
         try:
             log = Log(
                 worker_id=worker_id,
                 log_number=serial_no,
-                balance=balance,
-                install_date=serial_name or "—",
-                check_date=check_date,
-                tag=LogTag.MEDIUM,
-                comment=f"Импорт из Geelark: {remark}" if remark else "Импорт из Geelark"
+                balance=parsed["balance"],
+                owner=parsed["owner"],
+                install_date=install_date,
+                check_date=parsed["check_date"],
+                tag=tag,
+                comment=parsed["comment"]
             )
             db.add(log)
             await db.flush()
