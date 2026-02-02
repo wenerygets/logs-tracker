@@ -495,8 +495,13 @@ function renderWorkersWithPlan(workersStats) {
 function viewWorkerLogs(workerId, workerName) {
     if (!workerId) return;
     
-    // Переключаемся на вкладку "Все логи"
-    switchView('logs');
+    currentView = 'logs';
+    
+    // Update UI without calling loadLogs
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === 'logs'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.querySelectorAll('.bottom-nav-item').forEach(item => item.classList.toggle('active', item.dataset.view === 'logs'));
+    document.getElementById('logsView').classList.add('active');
     
     // Устанавливаем фильтр по воркеру
     const filterWorker = document.getElementById('filterWorker');
@@ -504,11 +509,17 @@ function viewWorkerLogs(workerId, workerName) {
         filterWorker.value = workerId;
     }
     
+    // Сбрасываем остальные фильтры
+    document.getElementById('filterTag').value = '';
+    document.getElementById('filterDate').value = '';
+    document.getElementById('filterArchive').value = 'false';
+    document.getElementById('filterProfit').value = '';
+    
     // Обновляем заголовок
     document.getElementById('pageTitle').textContent = 'Логи: ' + workerName;
     document.getElementById('pageSubtitle').textContent = 'Все кабинеты воркера';
     
-    // Загружаем логи с фильтром
+    // Загружаем логи ТОЛЬКО этого воркера
     loadLogs({ worker_id: workerId });
 }
 
