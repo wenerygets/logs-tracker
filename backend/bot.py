@@ -15,7 +15,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8286352882:AAFuO-HqBFrnA4gui9EUXsq2GTq6uyAS14U")
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")  # Telegram ID админа для уведомлений
-WEB_APP_URL = os.getenv("WEB_APP_URL", "https://logs.trf404.com")  # URL сайта для Web App
+WEB_APP_URL = os.getenv("WEB_APP_URL", "https://trf404.digital")  # URL сайта для Web App
 
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
