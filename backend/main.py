@@ -321,7 +321,8 @@ async def get_logs(
         except:
             pass
     
-    query = query.order_by(Log.created_at.desc()).limit(limit)
+    # Сортировка: закреплённые сверху, потом по дате (новые первыми)
+    query = query.order_by(Log.is_pinned.desc(), Log.created_at.desc()).limit(limit)
     result = await db.execute(query)
     return [log.to_dict() for log in result.scalars().all()]
 

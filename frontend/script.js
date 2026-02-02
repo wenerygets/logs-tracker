@@ -781,7 +781,7 @@ function renderLogsTable() {
         return; 
     }
     
-    // Сортировка: закреплённые всегда сверху
+    // Сортировка: закреплённые всегда сверху, затем по дате (новые сверху)
     let sortedLogs = [...logs].sort((a, b) => {
         // Закреплённые сверху
         if (a.is_pinned && !b.is_pinned) return -1;
@@ -797,8 +797,13 @@ function renderLogsTable() {
             
             if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
             if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+            return 0;
         }
-        return 0;
+        
+        // По умолчанию: новые сверху (по дате создания DESC)
+        const dateA = new Date(a.created_at || 0);
+        const dateB = new Date(b.created_at || 0);
+        return dateB - dateA;
     });
     
     logs = sortedLogs;
