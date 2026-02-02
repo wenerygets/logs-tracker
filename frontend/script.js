@@ -130,10 +130,10 @@ function showApp() {
     // Update mobile UI
     updateMobileUI();
     
-    // Show reset button for admin
-    const resetBtn = document.getElementById('resetLogsBtn');
-    if (resetBtn) {
-        resetBtn.style.display = isAdmin ? 'block' : 'none';
+    // Show reset stats button for admin
+    const resetStatsBtn = document.getElementById('resetStatsBtn');
+    if (resetStatsBtn) {
+        resetStatsBtn.style.display = isAdmin ? 'block' : 'none';
     }
     
     loadWorkers().then(() => switchView('dashboard'));
@@ -761,24 +761,15 @@ async function deleteWorker(id) {
     }
 }
 
-// ============ ADMIN: RESET ALL LOGS ============
+// ============ ADMIN: RESET STATS ============
 
-async function resetAllLogs() {
-    // Triple confirmation for safety
-    if (!confirm('⚠️ ВНИМАНИЕ!\n\nВы уверены что хотите удалить ВСЕ логи?\n\nЭто действие НЕОБРАТИМО!')) return;
-    if (!confirm('🔴 ПОСЛЕДНЕЕ ПРЕДУПРЕЖДЕНИЕ!\n\nВсе логи будут удалены навсегда.\n\nПродолжить?')) return;
+async function resetStats() {
+    if (!confirm('🔄 Сбросить статистику?\n\nСчётчики "за день" и "за неделю" обнулятся.\nВсе логи останутся на месте!')) return;
     
-    const code = prompt('Для подтверждения введите "УДАЛИТЬ":');
-    if (code !== 'УДАЛИТЬ') {
-        showToast('❌ Отменено', 'error');
-        return;
-    }
-    
-    const result = await api('DELETE', '/api/admin/reset-logs');
+    const result = await api('POST', '/api/admin/reset-stats');
     if (result && result.ok) {
-        showToast('✅ Все логи удалены!');
+        showToast('✅ Статистика сброшена!');
         loadStats();
-        loadLogs();
     } else {
         showToast('❌ Ошибка при сбросе', 'error');
     }

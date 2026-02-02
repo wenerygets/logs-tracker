@@ -450,8 +450,27 @@ async def get_users(user: User = Depends(get_current_user), db: AsyncSession = D
 
 # ==================== ADMIN ACTIONS ====================
 
-@app.delete("/api/admin/reset-logs")
-async def reset_all_logs(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+@app.post("/api/admin/reset-stats")
+async def reset_stats(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Сбросить статистику по дням (логи остаются, но счётчики обнуляются)"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    # Сдвигаем дату создания всех логов на 2 недели назад
+    # Это обнулит счётчики "за день" и "за неделю"
+    old_date = datetime.now() - timedelta(days=14)
+    
+    from sqlalchemy import update
+    await db.execute(
+        update(Log).values(created_at=old_date)
+    )
+    await db.commit()
+    
+    return {"message": "Статистика сброшена! Логи сохранены.", "ok": True}
+
+
+@app.delete("/api/admin/delete-all-logs")
+async def delete_all_logs(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Удалить все логи (только для админа)"""
     if user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="Только для админа")
