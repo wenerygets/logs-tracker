@@ -1,0 +1,592 @@
+const API = '';
+let logs = [], workers = [], stats = {}, currentView = 'dashboard', reminderDays = 0;
+let currentUser = null;
+let authToken = localStorage.getItem('token');
+
+const TAG_LABELS = {
+    fat: '🔥 Жир',
+    poor: '💸 Нищий',
+    medium: '📊 Средний',
+    salary: '💰 Есть ЗП'
+};
+
+// API with auth
+async function api(method, url, data) {
+    const opts = { 
+        method, 
+        headers: { 'Content-Type': 'application/json' }
+    };
+    if (authToken) {
+        opts.headers['Authorization'] = 'Bearer ' + authToken;
+    }
+    if (data && method !== 'GET') opts.body = JSON.stringify(data);
+    if (data && method === 'GET') {
+        const params = new URLSearchParams();
+        Object.entries(data).forEach(([k, v]) => v && params.append(k, v));
+        if (params.toString()) url += '?' + params;
+    }
+    try {
+        const r = await fetch(API + url, opts);
+        if (r.status === 401) {
+            logout();
+            return null;
+        }
+        return r.ok ? await r.json() : null;
+    } catch (e) {
+        console.error(e);
+        return null;
+    }
+}
+
+// Auth
+async function login(e) {
+    e.preventDefault();
+    const username = document.getElementById('loginUsername').value.trim().toLowerCase();
+    const password = document.getElementById('loginPassword').value;
+    const errorEl = document.getElementById('loginError');
+    
+    errorEl.textContent = '';
+    
+    const r = await fetch(API + '/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+    });
+    
+    if (!r.ok) {
+        errorEl.textContent = 'Неверный логин или пароль';
+        return;
+    }
+    
+    const data = await r.json();
+    authToken = data.token;
+    currentUser = data.user;
+    localStorage.setItem('token', authToken);
+    
+    showApp();
+}
+
+function logout() {
+    authToken = null;
+    currentUser = null;
+    localStorage.removeItem('token');
+    showLogin();
+}
+
+async function checkAuth() {
+    if (!authToken) {
+        showLogin();
+        return;
+    }
+    
+    const user = await api('GET', '/api/auth/me');
+    if (!user) {
+        showLogin();
+        return;
+    }
+    
+    currentUser = user;
+    showApp();
+}
+
+function showLogin() {
+    document.getElementById('loginScreen').style.display = 'flex';
+    document.getElementById('appScreen').style.display = 'none';
+}
+
+function showApp() {
+    document.getElementById('loginScreen').style.display = 'none';
+    document.getElementById('appScreen').style.display = 'flex';
+    
+    // Update UI based on role
+    const isAdmin = currentUser.role === 'admin';
+    
+    // User info
+    document.getElementById('userInfo').innerHTML = `
+        <strong>${currentUser.worker_name || currentUser.username}</strong>
+        <small>${isAdmin ? '👑 Админ' : '👤 Воркер'}</small>
+    `;
+    
+    // Hide workers nav for workers
+    document.getElementById('navWorkers').style.display = isAdmin ? 'flex' : 'none';
+    
+    // Hide workers card in stats
+    document.getElementById('statWorkersCard').style.display = isAdmin ? 'flex' : 'none';
+    document.getElementById('workersChartCard').style.display = isAdmin ? 'block' : 'none';
+    
+    // Hide worker filter for workers
+    document.getElementById('filterWorker').style.display = isAdmin ? 'block' : 'none';
+    
+    // Hide worker column for workers
+    document.getElementById('thWorker').style.display = isAdmin ? '' : 'none';
+    
+    // Hide worker select in log form for workers
+    document.getElementById('logWorkerGroup').style.display = isAdmin ? 'block' : 'none';
+    
+    loadWorkers().then(() => switchView('dashboard'));
+}
+
+// Data Loading
+async function loadStats() {
+    stats = await api('GET', '/api/stats') || {};
+    document.getElementById('statTotalLogs').textContent = stats.total_logs || 0;
+    document.getElementById('statWorkers').textContent = stats.total_workers || 0;
+    document.getElementById('statTodayChecks').textContent = stats.today_checks || 0;
+    renderTagBars(stats.by_tag);
+    if (currentUser.role === 'admin') {
+        renderWorkersWithPlan(stats.workers_stats || []);
+    }
+}
+
+async function loadWorkers() {
+    workers = await api('GET', '/api/workers') || [];
+    updateWorkerSelects();
+}
+
+async function loadLogs(filters = {}) {
+    logs = await api('GET', '/api/logs', filters) || [];
+    renderLogsTable();
+}
+
+async function loadReminders(days = 7) {
+    const url = days === 0 ? '/api/reminders/today' : '/api/reminders';
+    const reminders = await api('GET', url, days ? { days } : null) || [];
+    renderReminders(reminders);
+    if (days <= 7) renderUpcomingChecks(reminders.slice(0, 5));
+}
+
+// Render
+function renderTagBars(byTag) {
+    const el = document.getElementById('tagBars');
+    if (!byTag) { el.innerHTML = '<div class="empty-state">Нет данных</div>'; return; }
+    const total = Object.values(byTag).reduce((a, b) => a + b, 0) || 1;
+    const tags = [
+        { k: 'fat', l: '🔥 Жир' },
+        { k: 'poor', l: '💸 Нищий' },
+        { k: 'medium', l: '📊 Средний' },
+        { k: 'salary', l: '💰 Есть ЗП' }
+    ];
+    el.innerHTML = tags.map(t => `
+        <div class="tag-bar">
+            <span class="tag-bar-label">${t.l}</span>
+            <div class="tag-bar-track">
+                <div class="tag-bar-fill ${t.k}" style="width:${((byTag[t.k]||0)/total)*100}%"></div>
+            </div>
+            <span class="tag-bar-value">${byTag[t.k]||0}</span>
+        </div>
+    `).join('');
+}
+
+function renderWorkersWithPlan(workersStats) {
+    const el = document.getElementById('workersList');
+    if (!workersStats || !workersStats.length) { 
+        el.innerHTML = '<div class="empty-state">Нет данных</div>'; 
+        return; 
+    }
+    
+    el.innerHTML = workersStats.sort((a, b) => b.today - a.today).map(w => {
+        const percent = Math.min((w.today / w.plan) * 100, 100);
+        const planStatus = w.today >= w.plan ? 'done' : (w.today > 0 ? 'progress' : 'empty');
+        
+        return `
+        <div class="worker-plan-card clickable" onclick="viewWorkerLogs(${w.id}, '${esc(w.name)}')">
+            <div class="worker-plan-header">
+                <span class="worker-plan-name">👤 ${esc(w.name)}</span>
+                <span class="worker-plan-week" title="За неделю">📅 ${w.week}</span>
+            </div>
+            <div class="worker-plan-progress">
+                <div class="worker-plan-bar">
+                    <div class="worker-plan-fill ${planStatus}" style="width: ${percent}%"></div>
+                </div>
+                <span class="worker-plan-count ${planStatus}">${w.today}/${w.plan}</span>
+            </div>
+            <div class="worker-plan-footer">
+                <span>Всего: ${w.total}</span>
+                <span>${w.today >= w.plan ? '✅ План выполнен' : `⏳ Осталось: ${w.plan - w.today}`}</span>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// Просмотр логов воркера
+function viewWorkerLogs(workerId, workerName) {
+    if (!workerId) return;
+    
+    // Переключаемся на вкладку "Все логи"
+    switchView('logs');
+    
+    // Устанавливаем фильтр по воркеру
+    const filterWorker = document.getElementById('filterWorker');
+    if (filterWorker) {
+        filterWorker.value = workerId;
+    }
+    
+    // Обновляем заголовок
+    document.getElementById('pageTitle').textContent = 'Логи: ' + workerName;
+    document.getElementById('pageSubtitle').textContent = 'Все кабинеты воркера';
+    
+    // Загружаем логи с фильтром
+    loadLogs({ worker_id: workerId });
+}
+
+// Хранилище для ближайших проверок
+let upcomingChecksData = [];
+
+function renderUpcomingChecks(checks) {
+    const el = document.getElementById('upcomingChecks');
+    upcomingChecksData = checks || [];
+    
+    if (!checks?.length) { el.innerHTML = '<div class="empty-state">Нет проверок</div>'; return; }
+    
+    const today = new Date().getDate();
+    const tomorrow = new Date(Date.now() + 86400000).getDate();
+    
+    el.innerHTML = checks.map((l, idx) => {
+        // Определяем когда проверка
+        const days = (l.check_date || '').split('-').map(d => parseInt(d.trim())).filter(d => !isNaN(d));
+        let when = '';
+        if (days.includes(today)) when = '🔴 Сегодня';
+        else if (days.includes(tomorrow)) when = '🟡 Завтра';
+        
+        return `
+        <div class="check-item clickable" onclick="showLogDetails(${idx})">
+            <span class="check-item-when">${when}</span>
+            <span class="check-item-log">№${esc(l.log_number)}</span>
+            <span class="check-item-worker">${esc(l.worker_name)}</span>
+        </div>`;
+    }).join('');
+}
+
+// Показать детали лога
+function showLogDetails(idx) {
+    const log = upcomingChecksData[idx];
+    if (!log) return;
+    
+    const tag = TAG_LABELS[log.tag] || log.tag;
+    const owner = log.owner ? `@${log.owner}` : '—';
+    
+    const content = `
+        <div class="log-details">
+            <div class="log-details-row">
+                <span class="log-details-label">Номер лога</span>
+                <span class="log-details-value">№${esc(log.log_number)}</span>
+            </div>
+            <div class="log-details-row">
+                <span class="log-details-label">Воркер</span>
+                <span class="log-details-value">👤 ${esc(log.worker_name)}</span>
+            </div>
+            <div class="log-details-row">
+                <span class="log-details-label">Баланс</span>
+                <span class="log-details-value">💰 ${esc(log.balance)}</span>
+            </div>
+            <div class="log-details-row">
+                <span class="log-details-label">Владелец</span>
+                <span class="log-details-value">${esc(owner)}</span>
+            </div>
+            <div class="log-details-row">
+                <span class="log-details-label">Дата установки</span>
+                <span class="log-details-value">📅 ${log.install_date || '—'}</span>
+            </div>
+            <div class="log-details-row">
+                <span class="log-details-label">Дни проверки</span>
+                <span class="log-details-value">🔔 ${log.check_date || '—'}</span>
+            </div>
+            <div class="log-details-row">
+                <span class="log-details-label">Тег</span>
+                <span class="log-details-value">${tag}</span>
+            </div>
+            <div class="log-details-row">
+                <span class="log-details-label">Комментарий</span>
+                <span class="log-details-value">${esc(log.comment) || '—'}</span>
+            </div>
+        </div>
+        <div class="form-actions">
+            <button class="btn btn-secondary" onclick="closeDetailsModal()">Закрыть</button>
+            <button class="btn btn-primary" onclick="editLogFromDetails(${log.id})">✏️ Редактировать</button>
+        </div>
+    `;
+    
+    document.getElementById('detailsModalTitle').textContent = `Лог №${log.log_number}`;
+    document.getElementById('detailsModalContent').innerHTML = content;
+    document.getElementById('detailsModal').classList.add('active');
+}
+
+function closeDetailsModal() {
+    document.getElementById('detailsModal').classList.remove('active');
+}
+
+function editLogFromDetails(logId) {
+    closeDetailsModal();
+    const log = logs.find(l => l.id === logId) || upcomingChecksData.find(l => l.id === logId);
+    if (log) openLogModal(log);
+}
+
+function renderLogsTable() {
+    const el = document.getElementById('logsTableBody');
+    const isAdmin = currentUser.role === 'admin';
+    
+    if (!logs?.length) { 
+        el.innerHTML = `<tr><td colspan="${isAdmin ? 10 : 9}" class="empty-state">Логов нет</td></tr>`; 
+        return; 
+    }
+    
+    el.innerHTML = logs.map(l => `
+        <tr>
+            <td class="cell-mono cell-muted">#${l.id}</td>
+            ${isAdmin ? `<td><strong>${esc(l.worker_name)}</strong></td>` : ''}
+            <td class="cell-mono">${esc(l.log_number)}</td>
+            <td class="cell-mono">${esc(l.balance)}</td>
+            <td class="cell-owner">${l.owner ? `<span class="owner-badge">@${esc(l.owner)}</span>` : '—'}</td>
+            <td class="cell-mono cell-muted">${l.install_date||'—'}</td>
+            <td class="cell-mono cell-muted">${l.check_date||'—'}</td>
+            <td><span class="tag-badge ${l.tag}">${TAG_LABELS[l.tag]||l.tag}</span></td>
+            <td class="cell-muted" style="max-width:150px;overflow:hidden;text-overflow:ellipsis">${esc(l.comment)||'—'}</td>
+            <td>
+                <div class="actions">
+                    <button class="action-btn" onclick="editLog(${l.id})">✏️</button>
+                    <button class="action-btn" onclick="deleteLog(${l.id})">🗑️</button>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function renderWorkersGrid() {
+    const el = document.getElementById('workersGrid');
+    if (!workers?.length) { el.innerHTML = '<div class="empty-state">Нет воркеров</div>'; return; }
+    el.innerHTML = workers.map(w => `
+        <div class="worker-card">
+            <div class="worker-card-header">
+                <span class="worker-card-name">👤 ${esc(w.name)}</span>
+                <div class="actions">
+                    <button class="action-btn" onclick="editWorker(${w.id})">✏️</button>
+                    <button class="action-btn" onclick="deleteWorker(${w.id})">🗑️</button>
+                </div>
+            </div>
+            <div class="worker-card-stats">${w.logs_count||0}</div>
+            <div class="worker-card-label">логов</div>
+        </div>
+    `).join('');
+}
+
+function renderReminders(reminders) {
+    const el = document.getElementById('remindersGrid');
+    if (!reminders?.length) { el.innerHTML = '<div class="empty-state">Нет проверок</div>'; return; }
+    el.innerHTML = reminders.map(l => `
+        <div class="reminder-card">
+            <div class="reminder-card-header">
+                <span class="reminder-card-pin">№${esc(l.log_number)} | ${esc(l.pin)}</span>
+                <span class="reminder-card-date">${l.check_date||'—'}</span>
+            </div>
+            <div class="reminder-card-info">
+                <span>👤 ${esc(l.worker_name)}</span>
+                <span>💰 ${esc(l.balance)}</span>
+                <span>${TAG_LABELS[l.tag]||l.tag}</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+function updateWorkerSelects() {
+    const isAdmin = currentUser.role === 'admin';
+    
+    if (isAdmin) {
+        const opts = '<option value="">Все воркеры</option>' + workers.map(w => 
+            `<option value="${w.id}">${esc(w.name)}</option>`
+        ).join('');
+        document.getElementById('filterWorker').innerHTML = opts;
+    }
+    
+    document.getElementById('logWorker').innerHTML = '<option value="">Выберите воркера</option>' + 
+        workers.map(w => `<option value="${w.id}">${esc(w.name)}</option>`).join('');
+}
+
+// Navigation
+function switchView(view) {
+    // Workers view only for admin
+    if (view === 'workers' && currentUser.role !== 'admin') {
+        view = 'dashboard';
+    }
+    
+    currentView = view;
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === view));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    
+    const titles = {
+        dashboard: ['Dashboard', 'Общая статистика'],
+        logs: ['Все логи', currentUser.role === 'admin' ? 'Управление логами' : 'Мои логи'],
+        workers: ['Воркеры', 'Управление воркерами'],
+        reminders: ['Проверки', 'Логи на проверку']
+    };
+    document.getElementById('pageTitle').textContent = titles[view][0];
+    document.getElementById('pageSubtitle').textContent = titles[view][1];
+    
+    document.getElementById(view + 'View').classList.add('active');
+    
+    if (view === 'dashboard') { loadStats(); loadReminders(7); }
+    else if (view === 'logs') { loadLogs(); }
+    else if (view === 'workers') { loadWorkers().then(() => renderWorkersGrid()); }
+    else if (view === 'reminders') { loadReminders(reminderDays); }
+}
+
+// Log Modal
+function openLogModal(log = null) {
+    document.getElementById('logModalTitle').textContent = log ? 'Редактировать лог' : 'Добавить лог';
+    document.getElementById('logId').value = log?.id || '';
+    document.getElementById('logWorker').value = log?.worker_id || (currentUser.worker_id || '');
+    document.getElementById('logNumber').value = log?.log_number || '';
+    document.getElementById('logBalance').value = log?.balance || '';
+    document.getElementById('logOwner').value = log?.owner || '';
+    document.getElementById('logInstallDate').value = log?.install_date || '';
+    document.getElementById('logCheckDate').value = log?.check_date || '';
+    document.getElementById('logTag').value = log?.tag || 'medium';
+    document.getElementById('logComment').value = log?.comment || '';
+    document.getElementById('logModal').classList.add('active');
+}
+
+function closeLogModal() {
+    document.getElementById('logModal').classList.remove('active');
+}
+
+async function saveLog(e) {
+    e.preventDefault();
+    const data = {
+        worker_id: parseInt(document.getElementById('logWorker').value) || currentUser.worker_id,
+        log_number: document.getElementById('logNumber').value,
+        balance: document.getElementById('logBalance').value || '0',
+        owner: document.getElementById('logOwner').value || null,
+        install_date: document.getElementById('logInstallDate').value,
+        check_date: document.getElementById('logCheckDate').value || null,
+        tag: document.getElementById('logTag').value,
+        comment: document.getElementById('logComment').value || null
+    };
+    const id = document.getElementById('logId').value;
+    const r = id ? await api('PUT', `/api/logs/${id}`, data) : await api('POST', '/api/logs', data);
+    if (r) { closeLogModal(); loadLogs(); loadStats(); }
+}
+
+async function editLog(id) {
+    const log = logs.find(l => l.id === id);
+    if (log) openLogModal(log);
+}
+
+async function deleteLog(id) {
+    if (!confirm('Удалить лог?')) return;
+    if (await api('DELETE', `/api/logs/${id}`)) { loadLogs(); loadStats(); }
+}
+
+// Worker Modal (Admin only)
+function openWorkerModal(worker = null) {
+    document.getElementById('workerModalTitle').textContent = worker ? 'Редактировать воркера' : 'Добавить воркера';
+    document.getElementById('workerId').value = worker?.id || '';
+    document.getElementById('workerName').value = worker?.name || '';
+    document.getElementById('workerNotes').value = worker?.notes || '';
+    document.getElementById('workerModal').classList.add('active');
+}
+
+function closeWorkerModal() {
+    document.getElementById('workerModal').classList.remove('active');
+}
+
+async function saveWorker(e) {
+    e.preventDefault();
+    const data = {
+        name: document.getElementById('workerName').value,
+        notes: document.getElementById('workerNotes').value || null
+    };
+    const id = document.getElementById('workerId').value;
+    const r = id ? await api('PUT', `/api/workers/${id}`, data) : await api('POST', '/api/workers', data);
+    if (r) { closeWorkerModal(); loadWorkers().then(() => { if (currentView === 'workers') renderWorkersGrid(); }); loadStats(); }
+}
+
+async function editWorker(id) {
+    const w = workers.find(w => w.id === id);
+    if (w) openWorkerModal(w);
+}
+
+async function deleteWorker(id) {
+    const w = workers.find(w => w.id === id);
+    if (!confirm(`Удалить воркера "${w?.name}"?`)) return;
+    if (await api('DELETE', `/api/workers/${id}`)) { 
+        loadWorkers().then(() => { if (currentView === 'workers') renderWorkersGrid(); }); 
+        loadStats(); 
+    }
+}
+
+// Filters
+function applyFilters() {
+    loadLogs({
+        worker_id: document.getElementById('filterWorker').value,
+        tag: document.getElementById('filterTag').value
+    });
+}
+
+// Search
+let searchTimeout;
+function handleSearch() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        if (currentView === 'logs') loadLogs({ search: document.getElementById('searchInput').value });
+    }, 300);
+}
+
+// Utils
+function esc(s) {
+    if (!s) return '';
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+
+// Init
+document.addEventListener('DOMContentLoaded', () => {
+    // Login form
+    document.getElementById('loginForm').addEventListener('submit', login);
+    
+    // Nav
+    document.querySelectorAll('.nav-item').forEach(n => {
+        n.addEventListener('click', e => { e.preventDefault(); switchView(n.dataset.view); });
+    });
+    
+    // Buttons
+    document.getElementById('addLogBtn').addEventListener('click', () => openLogModal());
+    document.getElementById('addWorkerBtn').addEventListener('click', () => openWorkerModal());
+    
+    // Forms
+    document.getElementById('logForm').addEventListener('submit', saveLog);
+    document.getElementById('workerForm').addEventListener('submit', saveWorker);
+    
+    // Filters
+    document.getElementById('filterWorker').addEventListener('change', applyFilters);
+    document.getElementById('filterTag').addEventListener('change', applyFilters);
+    document.getElementById('searchInput').addEventListener('input', handleSearch);
+    
+    // Tabs
+    document.querySelectorAll('.tab').forEach(t => {
+        t.addEventListener('click', () => {
+            document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+            t.classList.add('active');
+            reminderDays = parseInt(t.dataset.days);
+            loadReminders(reminderDays);
+        });
+    });
+    
+    // Escape
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { closeLogModal(); closeWorkerModal(); closeDetailsModal(); }
+    });
+    
+    // Modal overlays
+    document.getElementById('logModal').addEventListener('click', e => {
+        if (e.target.id === 'logModal') closeLogModal();
+    });
+    document.getElementById('workerModal').addEventListener('click', e => {
+        if (e.target.id === 'workerModal') closeWorkerModal();
+    });
+    document.getElementById('detailsModal').addEventListener('click', e => {
+        if (e.target.id === 'detailsModal') closeDetailsModal();
+    });
+    
+    // Check auth
+    checkAuth();
+});

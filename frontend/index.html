@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logs Tracker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <!-- Animated Background -->
+    <div class="animated-bg">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+        <div class="grid-pattern"></div>
+    </div>
+
+    <!-- Login Screen -->
+    <div class="login-screen" id="loginScreen">
+        <div class="login-box">
+            <div class="login-logo">⚡ LogsTracker</div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Логин</label>
+                    <input type="text" id="loginUsername" required placeholder="Введите логин" autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label>Пароль</label>
+                    <input type="password" id="loginPassword" required placeholder="Введите пароль" autocomplete="current-password">
+                </div>
+                <div class="login-error" id="loginError"></div>
+                <button type="submit" class="btn btn-primary btn-block">Войти</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- App -->
+    <div class="app" id="appScreen" style="display:none">
+        <aside class="sidebar">
+            <div class="logo">
+                <span class="logo-icon">⚡</span>
+                <span class="logo-text">LogsTracker</span>
+            </div>
+            
+            <nav class="nav">
+                <a href="#" class="nav-item active" data-view="dashboard">
+                    <span>🏠</span> Dashboard
+                </a>
+                <a href="#" class="nav-item" data-view="logs">
+                    <span>📋</span> Все логи
+                </a>
+                <a href="#" class="nav-item" data-view="workers" id="navWorkers">
+                    <span>👥</span> Воркеры
+                </a>
+                <a href="#" class="nav-item" data-view="reminders">
+                    <span>🔔</span> Проверки
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="user-info" id="userInfo"></div>
+                <button class="btn btn-sm btn-secondary" onclick="logout()" style="width:100%;margin-top:10px">Выйти</button>
+            </div>
+        </aside>
+
+        <main class="main">
+            <header class="header">
+                <div class="header-left">
+                    <h1 id="pageTitle">Dashboard</h1>
+                    <span id="pageSubtitle">Общая статистика</span>
+                </div>
+                <div class="header-right">
+                    <input type="text" id="searchInput" placeholder="🔍 Поиск...">
+                    <button class="btn btn-primary" id="addLogBtn">➕ Добавить лог</button>
+                </div>
+            </header>
+
+            <div class="content">
+                <!-- Dashboard -->
+                <div class="view active" id="dashboardView">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <span class="stat-icon">📝</span>
+                            <div class="stat-info">
+                                <span class="stat-value" id="statTotalLogs">0</span>
+                                <span class="stat-label">Всего логов</span>
+                            </div>
+                        </div>
+                        <div class="stat-card" id="statWorkersCard">
+                            <span class="stat-icon">👥</span>
+                            <div class="stat-info">
+                                <span class="stat-value" id="statWorkers">0</span>
+                                <span class="stat-label">Воркеров</span>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-icon">🔔</span>
+                            <div class="stat-info">
+                                <span class="stat-value" id="statTodayChecks">0</span>
+                                <span class="stat-label">Проверок сегодня</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="dashboard-grid">
+                        <div class="card">
+                            <h3>По тегам</h3>
+                            <div id="tagBars"></div>
+                        </div>
+                        <div class="card" id="workersChartCard">
+                            <h3>📊 План воркеров (3/день)</h3>
+                            <div id="workersList"></div>
+                        </div>
+                        <div class="card">
+                            <h3>🔔 Проверки (сегодня/завтра)</h3>
+                            <div id="upcomingChecks"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logs -->
+                <div class="view" id="logsView">
+                    <div class="filters" id="logsFilters">
+                        <select id="filterWorker">
+                            <option value="">Все воркеры</option>
+                        </select>
+                        <select id="filterTag">
+                            <option value="">Все теги</option>
+                            <option value="fat">🔥 Жир</option>
+                            <option value="poor">💸 Нищий</option>
+                            <option value="medium">📊 Средний</option>
+                            <option value="salary">💰 Есть ЗП</option>
+                        </select>
+                    </div>
+
+                    <div class="table-container">
+                        <table class="logs-table">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th id="thWorker">Воркер</th>
+                                    <th>№ Лога</th>
+                                    <th>Баланс</th>
+                                    <th>Владелец</th>
+                                    <th>Установка</th>
+                                    <th>Проверка</th>
+                                    <th>Тег</th>
+                                    <th>Комментарий</th>
+                                    <th>Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody id="logsTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Workers (Admin only) -->
+                <div class="view" id="workersView">
+                    <div class="view-header">
+                        <button class="btn btn-primary" id="addWorkerBtn">➕ Добавить воркера</button>
+                    </div>
+                    <div class="workers-grid" id="workersGrid"></div>
+                </div>
+
+                <!-- Reminders -->
+                <div class="view" id="remindersView">
+                    <div class="tabs">
+                        <button class="tab active" data-days="0">Сегодня</button>
+                        <button class="tab" data-days="7">7 дней</button>
+                        <button class="tab" data-days="30">30 дней</button>
+                    </div>
+                    <div class="reminders-grid" id="remindersGrid"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Log Modal -->
+    <div class="modal-overlay" id="logModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="logModalTitle">Добавить лог</h2>
+                <button class="modal-close" onclick="closeLogModal()">×</button>
+            </div>
+            <form id="logForm">
+                <input type="hidden" id="logId">
+                
+                <div class="form-group" id="logWorkerGroup">
+                    <label>Воркер *</label>
+                    <select id="logWorker" required></select>
+                </div>
+                
+                <div class="form-group">
+                    <label>№ Лога *</label>
+                    <input type="text" id="logNumber" required placeholder="123">
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Баланс</label>
+                        <input type="text" id="logBalance" placeholder="400к">
+                    </div>
+                    <div class="form-group">
+                        <label>Принадлежащий</label>
+                        <input type="text" id="logOwner" placeholder="@username или имя">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Тег</label>
+                    <select id="logTag">
+                        <option value="medium">📊 Средний</option>
+                        <option value="fat">🔥 Жир</option>
+                        <option value="poor">💸 Нищий</option>
+                        <option value="salary">💰 Есть ЗП</option>
+                    </select>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Дата установки *</label>
+                        <input type="text" id="logInstallDate" required placeholder="3-5-7-25">
+                    </div>
+                    <div class="form-group">
+                        <label>Дата проверки</label>
+                        <input type="text" id="logCheckDate" placeholder="10-5-7-25">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Комментарий</label>
+                    <textarea id="logComment" rows="2" placeholder="Заметки..."></textarea>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeLogModal()">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Details Modal -->
+    <div class="modal-overlay" id="detailsModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="detailsModalTitle">Детали лога</h2>
+                <button class="modal-close" onclick="closeDetailsModal()">×</button>
+            </div>
+            <div id="detailsModalContent" style="padding: 25px;"></div>
+        </div>
+    </div>
+
+    <!-- Worker Modal -->
+    <div class="modal-overlay" id="workerModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="workerModalTitle">Добавить воркера</h2>
+                <button class="modal-close" onclick="closeWorkerModal()">×</button>
+            </div>
+            <form id="workerForm">
+                <input type="hidden" id="workerId">
+                
+                <div class="form-group">
+                    <label>Имя воркера *</label>
+                    <input type="text" id="workerName" required placeholder="Имя">
+                </div>
+                
+                <div class="form-group">
+                    <label>Заметки</label>
+                    <textarea id="workerNotes" rows="2"></textarea>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeWorkerModal()">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="/script.js"></script>
+</body>
+</html>
