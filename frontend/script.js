@@ -781,16 +781,28 @@ function renderLogsTable() {
         return; 
     }
     
-    // Сортировка: только если пользователь выбрал столбец
-    // По умолчанию используем порядок с бэкенда (закреплённые + новые сверху)
-    let sortedLogs = logs;
+    // Функция парсинга даты из формата DD.MM или D.MM
+    function parseInstallDate(dateStr) {
+        if (!dateStr) return new Date(0);
+        const parts = dateStr.split('.');
+        if (parts.length !== 2) return new Date(0);
+        const day = parseInt(parts[0]) || 1;
+        const month = parseInt(parts[1]) || 1;
+        // Используем текущий год, или предыдущий если месяц больше текущего
+        const now = new Date();
+        let year = now.getFullYear();
+        if (month > now.getMonth() + 1) year--; // Если месяц в будущем, значит это прошлый год
+        return new Date(year, month - 1, day);
+    }
     
-    if (sortColumn) {
-        sortedLogs = [...logs].sort((a, b) => {
-            // Закреплённые всегда сверху
-            if (a.is_pinned && !b.is_pinned) return -1;
-            if (!a.is_pinned && b.is_pinned) return 1;
-            
+    // Сортировка: закреплённые сверху, затем по дате установки (новые сверху)
+    let sortedLogs = [...logs].sort((a, b) => {
+        // Закреплённые всегда сверху
+        if (a.is_pinned && !b.is_pinned) return -1;
+        if (!a.is_pinned && b.is_pinned) return 1;
+        
+        // Если выбран столбец для сортировки
+        if (sortColumn) {
             let valA = a[sortColumn] || '';
             let valB = b[sortColumn] || '';
             
@@ -800,8 +812,13 @@ function renderLogsTable() {
             if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
             if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
             return 0;
-        });
-    }
+        }
+        
+        // По умолчанию: по дате установки (новые сверху)
+        const dateA = parseInstallDate(a.install_date);
+        const dateB = parseInstallDate(b.install_date);
+        return dateB - dateA; // DESC - новые сверху
+    });
     
     el.innerHTML = sortedLogs.map(l => `
         <tr class="${selectedLogs.has(l.id) ? 'selected' : ''} ${l.is_archived ? 'archived' : ''} ${l.is_pinned ? 'pinned' : ''} clickable-row" onclick="openLogDetailModal(${l.id}, event)">
