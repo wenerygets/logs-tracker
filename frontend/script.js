@@ -1313,6 +1313,7 @@ async function duplicateLog(id) {
 
 let currentNotesLogId = null;
 let currentDetailLogId = null;
+let currentDetailLog = null;
 
 // ============ LOG DETAIL MODAL ============
 
@@ -1326,6 +1327,7 @@ async function openLogDetailModal(logId, event) {
     if (!log) return;
     
     currentDetailLogId = logId;
+    currentDetailLog = log;  // Сохраняем лог для редактирования
     
     const content = document.getElementById('logDetailContent');
     const isAdmin = currentUser?.role === 'admin';
@@ -1400,12 +1402,14 @@ async function openLogDetailModal(logId, event) {
 function closeLogDetailModal() {
     document.getElementById('logDetailModal').classList.remove('active');
     currentDetailLogId = null;
+    currentDetailLog = null;
 }
 
 function editLogFromDetail() {
-    if (currentDetailLogId) {
+    if (currentDetailLog) {
+        const log = currentDetailLog;
         closeLogDetailModal();
-        editLog(currentDetailLogId);
+        openLogModal(log);
     }
 }
 
