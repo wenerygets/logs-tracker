@@ -130,6 +130,12 @@ function showApp() {
     // Update mobile UI
     updateMobileUI();
     
+    // Show reset button for admin
+    const resetBtn = document.getElementById('resetLogsBtn');
+    if (resetBtn) {
+        resetBtn.style.display = isAdmin ? 'block' : 'none';
+    }
+    
     loadWorkers().then(() => switchView('dashboard'));
 }
 
@@ -752,6 +758,29 @@ async function deleteWorker(id) {
     if (await api('DELETE', `/api/workers/${id}`)) { 
         loadWorkers().then(() => { if (currentView === 'workers') renderWorkersGrid(); }); 
         loadStats(); 
+    }
+}
+
+// ============ ADMIN: RESET ALL LOGS ============
+
+async function resetAllLogs() {
+    // Triple confirmation for safety
+    if (!confirm('⚠️ ВНИМАНИЕ!\n\nВы уверены что хотите удалить ВСЕ логи?\n\nЭто действие НЕОБРАТИМО!')) return;
+    if (!confirm('🔴 ПОСЛЕДНЕЕ ПРЕДУПРЕЖДЕНИЕ!\n\nВсе логи будут удалены навсегда.\n\nПродолжить?')) return;
+    
+    const code = prompt('Для подтверждения введите "УДАЛИТЬ":');
+    if (code !== 'УДАЛИТЬ') {
+        showToast('❌ Отменено', 'error');
+        return;
+    }
+    
+    const result = await api('DELETE', '/api/admin/reset-logs');
+    if (result && result.ok) {
+        showToast('✅ Все логи удалены!');
+        loadStats();
+        loadLogs();
+    } else {
+        showToast('❌ Ошибка при сбросе', 'error');
     }
 }
 

@@ -448,6 +448,21 @@ async def get_users(user: User = Depends(get_current_user), db: AsyncSession = D
     return [u.to_dict() for u in result.scalars().all()]
 
 
+# ==================== ADMIN ACTIONS ====================
+
+@app.delete("/api/admin/reset-logs")
+async def reset_all_logs(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Удалить все логи (только для админа)"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    # Удаляем все логи
+    await db.execute(Log.__table__.delete())
+    await db.commit()
+    
+    return {"message": "Все логи удалены", "ok": True}
+
+
 # ==================== BOT API (no auth, filter by worker_id) ====================
 
 @app.post("/api/bot/auth")
