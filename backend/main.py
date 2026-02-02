@@ -1528,16 +1528,30 @@ async def sync_geelark(data: dict = None, user: User = Depends(get_current_user)
     if not settings or not settings.bearer_token:
         raise HTTPException(status_code=400, detail="Geelark не настроен. Укажите Bearer Token.")
     
-    # Запрашиваем телефоны из Geelark
+    # Запрашиваем ВСЕ телефоны из Geelark (с пагинацией)
+    phones = []
+    page = 1
+    page_size = 100
+    
     try:
-        response = await geelark_request("/phone/list", {"page": 1, "pageSize": 100}, settings)
+        while True:
+            response = await geelark_request("/phone/list", {"page": page, "pageSize": page_size}, settings)
+            
+            if response.get("code") != 0:
+                raise HTTPException(status_code=400, detail=f"Ошибка Geelark: {response.get('msg', 'Неизвестная ошибка')}")
+            
+            data = response.get("data", {})
+            items = data.get("items", [])
+            phones.extend(items)
+            
+            # Проверяем есть ли ещё страницы
+            total = data.get("total", 0)
+            if len(phones) >= total or not items:
+                break
+            
+            page += 1
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ошибка подключения к Geelark: {str(e)}")
-    
-    if response.get("code") != 0:
-        raise HTTPException(status_code=400, detail=f"Ошибка Geelark: {response.get('msg', 'Неизвестная ошибка')}")
-    
-    phones = response.get("data", {}).get("items", [])
     
     # Получаем маппинги групп
     mappings_result = await db.execute(select(GeelarkGroupMapping))
