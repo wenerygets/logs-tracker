@@ -1310,110 +1310,94 @@ async def geelark_request(endpoint: str, data: dict, settings: GeelarkSettings) 
             return await resp.json()
 
 
-def parse_geelark_serial_name(serial_name: str) -> str:
+def parse_geelark_data(serial_name: str, remark: str) -> dict:
     """
-    Парсит serialName из Geelark — извлекает только дату
-    Ищет дату в ЛЮБОМ месте строки
-    Примеры:
-    - "01.02 19741" → "01.02"
-    - "02.02" → "02.02"
-    - "НЕ 15.01 12345" → "15.01"
-    - "ЖИР 03.02" → "03.02"
-    - "test 25-01 extra" → "25-01"
-    """
-    if not serial_name:
-        return "—"
+    Парсит данные из Geelark (имя + комментарий)
     
-    serial_name = serial_name.strip()
+    Имя (serialName): "ЖИР 02.02 86650 25% 45к" или "А 30.01 19581 25% 15к"
+    Комментарий (remark): "45к в металах накопительный" или "107к ЖИР"
     
-    # Ищем дату в формате DD.MM или DD-MM или DD/MM в ЛЮБОМ месте строки
-    date_match = re.search(r'(\d{1,2}[.\-/]\d{1,2})', serial_name)
-    if date_match:
-        return date_match.group(1)
-    
-    # Если нет даты — возвращаем прочерк
-    return "—"
-
-
-def parse_geelark_remark(remark: str) -> dict:
-    """
-    Парсит remark из Geelark
-    Примеры:
-    - "76к" → balance="76к"
-    - "76к-15-25" → balance="76к", check_date="15-25"
-    - "без зп 15к расходы @evgeniikuzn" → balance="15к", owner="evgeniikuzn", tag="poor", comment="расходы"
-    - "жир 100к @admin -5-10" → balance="100к", owner="admin", tag="fat", check_date="5-10"
-    
-    Returns dict with: balance, check_date, owner, tag, comment
+    Returns dict with: install_date, balance, tag, comment, owner, check_date
     """
     result = {
+        "install_date": "—",
         "balance": "0",
-        "check_date": None,
-        "owner": None,
         "tag": "medium",
-        "comment": None
+        "comment": None,
+        "owner": None,
+        "check_date": None
     }
     
-    if not remark:
-        return result
+    combined = f"{serial_name or ''} {remark or ''}".strip()
     
-    remark = remark.strip()
-    remaining_parts = []
+    # 1. Извлекаем дату установки (DD.MM или DD,MM)
+    date_match = re.search(r'(\d{1,2})[.,](\d{1,2})(?!\d)', combined)
+    if date_match:
+        result["install_date"] = f"{date_match.group(1)}.{date_match.group(2)}"
     
-    # 1. Извлекаем @username → owner
-    owner_match = re.search(r'@(\w+)', remark)
+    # 2. Извлекаем @username → owner
+    owner_match = re.search(r'@(\w+)', combined)
     if owner_match:
         result["owner"] = owner_match.group(1)
-        remark = remark.replace(owner_match.group(0), '').strip()
+        combined = combined.replace(owner_match.group(0), '').strip()
     
-    # 2. Извлекаем баланс (число + ОБЯЗАТЕЛЬНО к/кк/k/kk)
-    # Баланс ДОЛЖЕН иметь суффикс к/кк, иначе это не баланс!
-    balance_match = re.search(r'(\d+(?:[.,]\d+)?)\s*(кк|к|k|kk)', remark, re.IGNORECASE)
+    # 3. Извлекаем баланс (число + к/кк) — ищем в комментарии в первую очередь
+    remark_str = remark or ''
+    balance_match = re.search(r'(\d+(?:[.,]\d+)?)\s*(кк|к|k|kk)', remark_str, re.IGNORECASE)
+    if not balance_match:
+        # Если в комментарии нет, ищем в имени
+        balance_match = re.search(r'(\d+(?:[.,]\d+)?)\s*(кк|к|k|kk)', serial_name or '', re.IGNORECASE)
+    
     if balance_match:
         balance_num = balance_match.group(1)
-        balance_suffix = balance_match.group(2)
-        # Нормализуем суффикс
-        suffix = balance_suffix.lower().replace('k', 'к')
-        result["balance"] = f"{balance_num}{suffix}"
-        remark = remark.replace(balance_match.group(0), '').strip()
+        balance_suffix = balance_match.group(2).lower().replace('k', 'к')
+        result["balance"] = f"{balance_num}{balance_suffix}"
     
-    # 3. Извлекаем даты проверки СНАЧАЛА (числа через дефис: 5-20-22-26)
-    # Это важно делать ДО поиска тегов, чтобы не потерять даты
-    check_date_match = re.search(r'(\d{1,2}(?:\s*-\s*\d{1,2})+)', remark)
-    if check_date_match:
-        dates_str = check_date_match.group(1).replace(' ', '')
-        # Проверяем что это даты (числа от 1 до 31)
-        dates = [d for d in dates_str.split('-') if d.isdigit() and 1 <= int(d) <= 31]
-        if len(dates) >= 2:  # Минимум 2 даты чтобы это считалось датами проверки
-            result["check_date"] = "-".join(dates)
-            remark = remark.replace(check_date_match.group(0), '').strip()
-    
-    # 4. Извлекаем теги
+    # 4. Извлекаем теги — ищем в обоих полях
     tag_patterns = {
-        "poor": [r'без\s*зп', r'безз', r'бзп', r'нищий', r'нищ', r'пустой', r'\dп\b', r'\d\s*п\b'],
-        "fat": [r'жир', r'жирн', r'топ', r'🔥', r'фат'],
-        "salary": [r'есть\s*зп', r'зп\s*есть', r'зарплата', r'💰', r'езп'],
-        "medium": [r'средний', r'норм', r'📊', r'срд']
+        "fat": [r'\bжир\w*\b', r'\bфат\b', r'\bтоп\b'],
+        "poor": [r'\bнищ\w*\b', r'\bбез\s*зп\b', r'\bпуст\w*\b', r'\bфулл\s*нищ', r'\d+\s*п\b'],
+        "salary": [r'\bесть\s*зп\b', r'\bзп\s*есть\b', r'\bзарплат\w*\b'],
     }
     
-    remark_lower = remark.lower()
+    combined_lower = combined.lower()
     for tag, patterns in tag_patterns.items():
         for pattern in patterns:
-            if re.search(pattern, remark_lower):
+            if re.search(pattern, combined_lower):
                 result["tag"] = tag
-                # Удаляем найденный тег из строки
-                remark = re.sub(pattern, '', remark, flags=re.IGNORECASE).strip()
                 break
         if result["tag"] != "medium":
             break
     
-    # 5. Остаток — комментарий
-    # Очищаем лишние пробелы и дефисы
-    remark = re.sub(r'\s+', ' ', remark).strip(' -')
+    # 5. Извлекаем даты проверки (числа через дефис: 5-20-22)
+    # Ищем в комментарии
+    check_match = re.search(r'(\d{1,2}(?:\s*-\s*\d{1,2}){1,})', remark_str)
+    if check_match:
+        dates_str = check_match.group(1).replace(' ', '')
+        dates = [d for d in dates_str.split('-') if d.isdigit() and 1 <= int(d) <= 31]
+        if len(dates) >= 2:
+            result["check_date"] = "-".join(dates)
+    
+    # 6. Формируем комментарий — берём из remark, убираем баланс и тег
     if remark:
-        result["comment"] = remark
+        comment = remark
+        # Убираем баланс
+        comment = re.sub(r'\d+(?:[.,]\d+)?\s*(кк|к|k|kk)', '', comment, flags=re.IGNORECASE)
+        # Убираем известные теги
+        for patterns in tag_patterns.values():
+            for pattern in patterns:
+                comment = re.sub(pattern, '', comment, flags=re.IGNORECASE)
+        # Убираем даты проверки
+        comment = re.sub(r'\d{1,2}(?:\s*-\s*\d{1,2})+', '', comment)
+        # Убираем @username
+        comment = re.sub(r'@\w+', '', comment)
+        # Чистим
+        comment = re.sub(r'\s+', ' ', comment).strip(' -.,')
+        if comment:
+            result["comment"] = comment
     
     return result
+
 
 
 @app.get("/api/geelark/settings")
@@ -1639,14 +1623,11 @@ async def sync_geelark(data: dict = None, user: User = Depends(get_current_user)
         
         # Парсим данные
         serial_no = phone.get("serialNo", "")  # Номер лога
-        serial_name = phone.get("serialName", "")  # Дата установки (убираем цифры после даты)
-        remark = phone.get("remark", "")  # Баланс, владелец, тег, комментарий, даты проверки
+        serial_name = phone.get("serialName", "")  # Имя: "ЖИР 02.02 86650 25% 45к"
+        remark = phone.get("remark", "")  # Комментарий: "45к в металах"
         
-        # Парсим serialName — только дату
-        install_date = parse_geelark_serial_name(serial_name)
-        
-        # Парсим remark — извлекаем всё
-        parsed = parse_geelark_remark(remark)
+        # Парсим оба поля вместе
+        parsed = parse_geelark_data(serial_name, remark)
         
         # Определяем тег
         try:
@@ -1661,7 +1642,7 @@ async def sync_geelark(data: dict = None, user: User = Depends(get_current_user)
                 log_number=serial_no,
                 balance=parsed["balance"],
                 owner=parsed["owner"],
-                install_date=install_date,
+                install_date=parsed["install_date"],
                 check_date=parsed["check_date"],
                 tag=tag,
                 comment=parsed["comment"]
