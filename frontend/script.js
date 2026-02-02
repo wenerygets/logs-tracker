@@ -454,25 +454,30 @@ function renderWorkersWithPlan(workersStats) {
         return; 
     }
     
-    el.innerHTML = workersStats.sort((a, b) => b.today - a.today).map(w => {
-        const percent = Math.min((w.today / w.plan) * 100, 100);
-        const planStatus = w.today >= w.plan ? 'done' : (w.today > 0 ? 'progress' : 'empty');
+    el.innerHTML = workersStats.sort((a, b) => (b.today || 0) - (a.today || 0)).map(w => {
+        const today = w.today || 0;
+        const plan = w.daily_goal || 3;
+        const week = w.week || 0;
+        const total = w.total || 0;
+        const percent = Math.min((today / plan) * 100, 100);
+        const planStatus = today >= plan ? 'done' : (today > 0 ? 'progress' : 'empty');
+        const remaining = plan - today;
         
         return `
         <div class="worker-plan-card clickable" onclick="viewWorkerLogs(${w.id}, '${esc(w.name)}')">
             <div class="worker-plan-header">
                 <span class="worker-plan-name">👤 ${esc(w.name)}</span>
-                <span class="worker-plan-week" title="За неделю">📅 ${w.week}</span>
+                <span class="worker-plan-week" title="За неделю">📅 ${week}</span>
             </div>
             <div class="worker-plan-progress">
                 <div class="worker-plan-bar">
                     <div class="worker-plan-fill ${planStatus}" style="width: ${percent}%"></div>
                 </div>
-                <span class="worker-plan-count ${planStatus}">${w.today}/${w.plan}</span>
+                <span class="worker-plan-count ${planStatus}">${today}/${plan}</span>
             </div>
             <div class="worker-plan-footer">
-                <span>Всего: ${w.total}</span>
-                <span>${w.today >= w.plan ? '✅ План выполнен' : `⏳ Осталось: ${w.plan - w.today}`}</span>
+                <span>Всего: ${total}</span>
+                <span>${today >= plan ? '✅ План выполнен' : `⏳ Осталось: ${remaining}`}</span>
             </div>
         </div>`;
     }).join('');
