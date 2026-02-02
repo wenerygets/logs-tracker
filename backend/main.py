@@ -1341,12 +1341,25 @@ def parse_geelark_data(serial_name: str, remark: str) -> dict:
         result["owner"] = owner_match.group(1)
         combined = combined.replace(owner_match.group(0), '').strip()
     
-    # 3. Извлекаем баланс (число + к/кк) — ищем в комментарии в первую очередь
+    # 3. Извлекаем баланс (число + к/кк) — НО не если это "расходы"
     remark_str = remark or ''
-    balance_match = re.search(r'(\d+(?:[.,]\d+)?)\s*(кк|к|k|kk)', remark_str, re.IGNORECASE)
+    
+    # Ищем баланс, но исключаем "расходы"
+    # Паттерн: число + к/кк, но НЕ перед словом "расход"
+    def find_balance(text):
+        # Находим все числа с к/кк
+        matches = re.finditer(r'(\d+(?:[.,]\d+)?)\s*(кк|к|k|kk)', text, re.IGNORECASE)
+        for m in matches:
+            # Проверяем что после числа НЕ идёт "расход"
+            after_match = text[m.end():m.end()+15].lower()
+            if not re.match(r'\s*расход', after_match):
+                return m
+        return None
+    
+    balance_match = find_balance(remark_str)
     if not balance_match:
         # Если в комментарии нет, ищем в имени
-        balance_match = re.search(r'(\d+(?:[.,]\d+)?)\s*(кк|к|k|kk)', serial_name or '', re.IGNORECASE)
+        balance_match = find_balance(serial_name or '')
     
     if balance_match:
         balance_num = balance_match.group(1)
