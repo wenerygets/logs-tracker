@@ -371,6 +371,45 @@
         </div>
     </div>
 
+    <!-- Worker Stats Modal -->
+    <div class="modal-overlay" id="workerStatsModal">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h2>📊 Статистика: <span id="workerStatsName"></span></h2>
+                <button class="modal-close" onclick="closeWorkerStatsModal()">×</button>
+            </div>
+            <div class="worker-stats-content">
+                <div class="worker-stats-grid">
+                    <div class="stat-mini"><span class="stat-mini-value" id="wsToday">0</span><span class="stat-mini-label">Сегодня</span></div>
+                    <div class="stat-mini"><span class="stat-mini-value" id="wsWeek">0</span><span class="stat-mini-label">Неделя</span></div>
+                    <div class="stat-mini"><span class="stat-mini-value" id="wsMonth">0</span><span class="stat-mini-label">Месяц</span></div>
+                    <div class="stat-mini"><span class="stat-mini-value" id="wsProfit">0</span><span class="stat-mini-label">Профит</span></div>
+                </div>
+                <div class="worker-stats-chart">
+                    <canvas id="workerChart"></canvas>
+                </div>
+                <div class="worker-stats-tags" id="wsTagsGrid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notes Modal -->
+    <div class="modal-overlay" id="notesModal">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h2>💬 Заметки к логу <span id="notesLogNumber"></span></h2>
+                <button class="modal-close" onclick="closeNotesModal()">×</button>
+            </div>
+            <div class="notes-content">
+                <div class="notes-list" id="notesList"></div>
+                <div class="notes-form">
+                    <textarea id="noteText" rows="2" placeholder="Добавить заметку..."></textarea>
+                    <button class="btn btn-primary" onclick="addNote()">Отправить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Import Modal -->
     <div class="modal-overlay" id="importModal">
         <div class="modal">

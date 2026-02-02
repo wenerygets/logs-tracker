@@ -1355,6 +1355,125 @@ body.light-theme .logs-table tr:hover {
     cursor: pointer;
 }
 
+/* ============ NOTES ============ */
+.modal-lg {
+    max-width: 600px;
+}
+
+.notes-content {
+    padding: 20px;
+}
+
+.notes-list {
+    max-height: 300px;
+    overflow-y: auto;
+    margin-bottom: 15px;
+}
+
+.note-item {
+    background: var(--bg-secondary);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 10px;
+}
+
+.note-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    font-size: 12px;
+}
+
+.note-author {
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.note-date {
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
+.note-text {
+    color: var(--text-secondary);
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.notes-form {
+    display: flex;
+    gap: 10px;
+}
+
+.notes-form textarea {
+    flex: 1;
+    resize: none;
+}
+
+.action-btn-sm {
+    width: 24px;
+    height: 24px;
+    font-size: 12px;
+}
+
+/* ============ WORKER STATS MODAL ============ */
+.worker-stats-content {
+    padding: 20px;
+}
+
+.worker-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.stat-mini {
+    text-align: center;
+    padding: 15px;
+    background: var(--bg-secondary);
+    border-radius: 12px;
+}
+
+.stat-mini-value {
+    display: block;
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 5px;
+}
+
+.stat-mini-label {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.worker-stats-chart {
+    height: 200px;
+    margin-bottom: 20px;
+}
+
+.worker-stats-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.ws-tag {
+    padding: 8px 15px;
+    border-radius: 20px;
+    border: 2px solid;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+@media (max-width: 600px) {
+    .worker-stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
 /* ============ TAG BADGE ============ */
 .tag-badge {
     display: inline-block;

@@ -11,7 +11,7 @@ import os
 import secrets
 
 from database import get_db, init_db
-from models import Log, Worker, LogTag, User, UserRole, Session, AuditLog
+from models import Log, Worker, LogTag, User, UserRole, Session, AuditLog, LogNote, CustomTag
 import json
 
 app = FastAPI(title="Logs Tracker", version="4.0.0")
@@ -763,6 +763,124 @@ async def get_users(user: User = Depends(get_current_user), db: AsyncSession = D
     return [u.to_dict() for u in result.scalars().all()]
 
 
+# ==================== LOG NOTES ====================
+
+@app.get("/api/logs/{log_id}/notes")
+async def get_log_notes(log_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Получить заметки к логу"""
+    result = await db.execute(
+        select(LogNote)
+        .options(selectinload(LogNote.user))
+        .where(LogNote.log_id == log_id)
+        .order_by(LogNote.created_at.desc())
+    )
+    return [n.to_dict() for n in result.scalars().all()]
+
+
+@app.post("/api/logs/{log_id}/notes")
+async def add_log_note(log_id: int, data: dict, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Добавить заметку к логу"""
+    text = data.get("text", "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Текст заметки обязателен")
+    
+    # Проверяем существование лога
+    result = await db.execute(select(Log).where(Log.id == log_id))
+    log = result.scalar_one_or_none()
+    if not log:
+        raise HTTPException(status_code=404, detail="Лог не найден")
+    
+    # Воркер может добавлять заметки только к своим логам
+    if user.role == UserRole.WORKER and user.worker_id != log.worker_id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    
+    note = LogNote(
+        log_id=log_id,
+        user_id=user.id,
+        text=text
+    )
+    db.add(note)
+    await db.commit()
+    await db.refresh(note)
+    
+    return {"ok": True, "note": note.to_dict()}
+
+
+@app.delete("/api/notes/{note_id}")
+async def delete_log_note(note_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Удалить заметку"""
+    result = await db.execute(select(LogNote).where(LogNote.id == note_id))
+    note = result.scalar_one_or_none()
+    if not note:
+        raise HTTPException(status_code=404, detail="Заметка не найдена")
+    
+    # Только автор или админ может удалить
+    if user.role != UserRole.ADMIN and note.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+    
+    await db.delete(note)
+    await db.commit()
+    return {"ok": True}
+
+
+# ==================== CUSTOM TAGS ====================
+
+@app.get("/api/tags")
+async def get_custom_tags(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Получить все теги (стандартные + кастомные)"""
+    # Стандартные теги
+    standard = [
+        {"id": "fat", "name": "Жир", "color": "#ef4444", "icon": "🔥", "standard": True},
+        {"id": "poor", "name": "Нищий", "color": "#a855f7", "icon": "💸", "standard": True},
+        {"id": "medium", "name": "Средний", "color": "#3b82f6", "icon": "📊", "standard": True},
+        {"id": "salary", "name": "Есть ЗП", "color": "#22c55e", "icon": "💰", "standard": True},
+    ]
+    
+    # Кастомные теги
+    result = await db.execute(select(CustomTag).order_by(CustomTag.name))
+    custom = [{"id": f"custom_{t.id}", **t.to_dict(), "standard": False} for t in result.scalars().all()]
+    
+    return standard + custom
+
+
+@app.post("/api/tags")
+async def create_custom_tag(data: dict, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Создать кастомный тег (только админ)"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    name = data.get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Название обязательно")
+    
+    tag = CustomTag(
+        name=name,
+        color=data.get("color", "#8b5cf6"),
+        icon=data.get("icon", "🏷️")
+    )
+    db.add(tag)
+    await db.commit()
+    await db.refresh(tag)
+    
+    return {"ok": True, "tag": tag.to_dict()}
+
+
+@app.delete("/api/tags/{tag_id}")
+async def delete_custom_tag(tag_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Удалить кастомный тег (только админ)"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    result = await db.execute(select(CustomTag).where(CustomTag.id == tag_id))
+    tag = result.scalar_one_or_none()
+    if not tag:
+        raise HTTPException(status_code=404, detail="Тег не найден")
+    
+    await db.delete(tag)
+    await db.commit()
+    return {"ok": True}
+
+
 # ==================== ACHIEVEMENTS & LEADERBOARD ====================
 
 ACHIEVEMENTS = {
@@ -834,6 +952,65 @@ async def get_monthly_leaderboard(user: User = Depends(get_current_user), db: As
             })
     
     return sorted(leaderboard, key=lambda x: -x["count"])
+
+
+@app.get("/api/workers/{worker_id}/stats")
+async def get_worker_stats(worker_id: int, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Детальная статистика воркера с графиком"""
+    result = await db.execute(select(Worker).options(selectinload(Worker.logs)).where(Worker.id == worker_id))
+    worker = result.scalar_one_or_none()
+    if not worker:
+        raise HTTPException(status_code=404, detail="Воркер не найден")
+    
+    today = datetime.now().date()
+    week_start = today - timedelta(days=today.weekday())
+    month_start = today.replace(day=1)
+    
+    active_logs = [l for l in worker.logs if not l.is_archived]
+    
+    # Статистика по дням (последние 14 дней)
+    daily_data = []
+    for i in range(13, -1, -1):
+        day = today - timedelta(days=i)
+        count = sum(1 for l in active_logs if l.created_at and l.created_at.date() == day)
+        daily_data.append({"date": day.strftime("%d.%m"), "count": count})
+    
+    # По тегам
+    by_tag = {}
+    for l in active_logs:
+        tag = l.tag.value if hasattr(l.tag, 'value') else str(l.tag)
+        by_tag[tag] = by_tag.get(tag, 0) + 1
+    
+    # Профит
+    total_profit = 0
+    for l in active_logs:
+        if l.profit:
+            try:
+                p = l.profit.lower().replace(' ', '')
+                if 'кк' in p:
+                    total_profit += float(p.replace('кк', '')) * 1000
+                elif 'к' in p:
+                    total_profit += float(p.replace('к', ''))
+            except:
+                pass
+    
+    profit_str = f"{total_profit/1000:.1f}кк" if total_profit >= 1000 else f"{total_profit:.0f}к"
+    
+    return {
+        "worker": worker.to_dict(),
+        "total_logs": len(active_logs),
+        "today_logs": sum(1 for l in active_logs if l.created_at and l.created_at.date() == today),
+        "week_logs": sum(1 for l in active_logs if l.created_at and l.created_at.date() >= week_start),
+        "month_logs": sum(1 for l in active_logs if l.created_at and l.created_at.date() >= month_start),
+        "total_profit": profit_str,
+        "by_tag": by_tag,
+        "daily_data": daily_data,
+        "goals": {
+            "daily": worker.daily_goal or 3,
+            "weekly": worker.weekly_goal or 15,
+            "monthly": worker.monthly_goal or 60
+        }
+    }
 
 
 # ==================== AUDIT LOG ====================

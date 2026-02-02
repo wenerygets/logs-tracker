@@ -46,13 +46,21 @@ TAG_LABELS = {
 }
 
 
-def main_kb():
-    return ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="➕ Добавить лог"), KeyboardButton(text="📋 Мои логи")],
-        [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="🏆 Топ недели")],
-        [KeyboardButton(text="🔔 Проверки"), KeyboardButton(text="🔍 Поиск")],
-        [KeyboardButton(text="🎯 Мой прогресс"), KeyboardButton(text="🚪 Выйти")]
-    ], resize_keyboard=True)
+def main_kb(is_admin=False):
+    """Клавиатура меню. Админ может добавлять логи, воркеры - нет"""
+    if is_admin:
+        return ReplyKeyboardMarkup(keyboard=[
+            [KeyboardButton(text="➕ Добавить лог"), KeyboardButton(text="📋 Все логи")],
+            [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="🏆 Топ недели")],
+            [KeyboardButton(text="🔔 Проверки"), KeyboardButton(text="🔍 Поиск")],
+            [KeyboardButton(text="🎯 Прогресс"), KeyboardButton(text="🚪 Выйти")]
+        ], resize_keyboard=True)
+    else:
+        return ReplyKeyboardMarkup(keyboard=[
+            [KeyboardButton(text="📋 Мои логи"), KeyboardButton(text="📊 Статистика")],
+            [KeyboardButton(text="🏆 Топ недели"), KeyboardButton(text="🔔 Проверки")],
+            [KeyboardButton(text="🎯 Мой прогресс"), KeyboardButton(text="🚪 Выйти")]
+        ], resize_keyboard=True)
 
 
 def tag_kb():
@@ -129,9 +137,10 @@ async def cmd_start(message: types.Message, state: FSMContext):
     
     if user_id in authorized_users:
         user = authorized_users[user_id]
+        is_admin = user.get('role') == 'admin'
         await message.answer(
             f"👋 С возвращением, *{user.get('worker_name', user.get('username'))}*!",
-            reply_markup=main_kb(),
+            reply_markup=main_kb(is_admin),
             parse_mode="Markdown"
         )
         return
@@ -159,10 +168,11 @@ async def process_key(message: types.Message, state: FSMContext):
                     authorized_users[message.from_user.id] = user
                     
                     await state.clear()
+                    is_admin = user.get('role') == 'admin'
                     await message.answer(
                         f"✅ *Авторизация успешна!*\n\n"
                         f"Добро пожаловать, *{user.get('worker_name', user.get('username'))}*!",
-                        reply_markup=main_kb(),
+                        reply_markup=main_kb(is_admin),
                         parse_mode="Markdown"
                     )
                 else:
@@ -203,6 +213,11 @@ async def require_auth(message: types.Message) -> dict:
 async def add_log_start(msg: types.Message, state: FSMContext):
     user = await require_auth(msg)
     if not user:
+        return
+    
+    # Только админ может добавлять логи
+    if user.get('role') != 'admin':
+        await msg.answer("❌ Только администратор может добавлять логи.")
         return
     
     await state.set_state(States.entering_log_number)
@@ -388,7 +403,7 @@ async def save_log_final(msg, state, data):
 
 # ========== МОИ ЛОГИ ==========
 
-@dp.message(F.text == "📋 Мои логи")
+@dp.message(F.text.in_(["📋 Мои логи", "📋 Все логи"]))
 async def show_logs(msg: types.Message):
     user = await require_auth(msg)
     if not user:
@@ -683,6 +698,26 @@ async def send_evening_report():
             logging.error(f"Ошибка вечернего отчёта {telegram_id}: {e}")
 
 
+async def send_check_reminders():
+    """Напоминания о проверках в течение дня"""
+    logging.info("🔔 Проверка напоминаний о проверках...")
+    
+    for telegram_id, user in authorized_users.items():
+        try:
+            logs = await api_req("GET", "/api/bot/reminders/today", None, user)
+            
+            if logs and len(logs) > 0:
+                txt = f"⏰ *Напоминание!*\n\nУ вас {len(logs)} логов на проверку сегодня:\n\n"
+                for log in logs[:3]:
+                    txt += f"• №{log['log_number']} — {log.get('balance', '—')}\n"
+                if len(logs) > 3:
+                    txt += f"\n...и ещё {len(logs) - 3}"
+                
+                await bot.send_message(telegram_id, txt, parse_mode="Markdown")
+        except Exception as e:
+            logging.error(f"Ошибка напоминания {telegram_id}: {e}")
+
+
 async def scheduler():
     """Планировщик уведомлений"""
     while True:
@@ -691,6 +726,14 @@ async def scheduler():
         # Утренние уведомления в 9:00
         if now.hour == 9 and now.minute == 0:
             await send_morning_notifications()
+        
+        # Напоминание в 13:00
+        if now.hour == 13 and now.minute == 0:
+            await send_check_reminders()
+        
+        # Напоминание в 17:00
+        if now.hour == 17 and now.minute == 0:
+            await send_check_reminders()
         
         # Вечерние отчёты в 21:00
         if now.hour == 21 and now.minute == 0:

@@ -87,6 +87,38 @@ def migrate():
     except Exception as e:
         print(f"[-] Ошибка audit_logs: {e}")
     
+    # 5. Создаём таблицу log_notes (заметки к логам)
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS log_notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                log_id INTEGER NOT NULL,
+                user_id INTEGER,
+                text TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (log_id) REFERENCES logs(id),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
+        print("[+] Таблица log_notes создана")
+    except Exception as e:
+        print(f"[-] Ошибка log_notes: {e}")
+    
+    # 6. Создаём таблицу custom_tags (кастомные теги)
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS custom_tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR(50) NOT NULL,
+                color VARCHAR(20) DEFAULT '#8b5cf6',
+                icon VARCHAR(10) DEFAULT '🏷️',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        print("[+] Таблица custom_tags создана")
+    except Exception as e:
+        print(f"[-] Ошибка custom_tags: {e}")
+    
     conn.commit()
     
     # Показываем статистику

@@ -111,6 +111,49 @@ class Session(Base):
     user = relationship("User")
 
 
+class CustomTag(Base):
+    """Кастомные теги"""
+    __tablename__ = "custom_tags"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(50), nullable=False)
+    color = Column(String(20), default="#8b5cf6")  # HEX цвет
+    icon = Column(String(10), default="🏷️")
+    created_at = Column(DateTime, default=func.now())
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "color": self.color,
+            "icon": self.icon
+        }
+
+
+class LogNote(Base):
+    """Заметки к логам"""
+    __tablename__ = "log_notes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    log_id = Column(Integer, ForeignKey("logs.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    text = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+
+    log = relationship("Log", back_populates="notes")
+    user = relationship("User")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "log_id": self.log_id,
+            "user_id": self.user_id,
+            "user_name": self.user.username if self.user else "Система",
+            "text": self.text,
+            "created_at": self.created_at.isoformat() if self.created_at else None
+        }
+
+
 class AuditLog(Base):
     """Журнал изменений"""
     __tablename__ = "audit_logs"
@@ -145,6 +188,7 @@ class Log(Base):
     id = Column(Integer, primary_key=True, index=True)
     worker_id = Column(Integer, ForeignKey("workers.id"), nullable=False)
     worker = relationship("Worker", back_populates="logs")
+    notes = relationship("LogNote", back_populates="log", cascade="all, delete-orphan")
 
     log_number = Column(String(50), nullable=False)
     pin = Column(String(100), nullable=True)  # Deprecated, kept for compatibility

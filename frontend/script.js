@@ -671,6 +671,7 @@ function renderLogsTable() {
             <td><span class="tag-badge ${l.tag}">${TAG_LABELS[l.tag]||l.tag}</span></td>
             <td>
                 <div class="actions">
+                    <button class="action-btn" onclick="openNotesModal(${l.id}, '${esc(l.log_number)}')" title="Заметки">💬</button>
                     <button class="action-btn" onclick="togglePin(${l.id})" title="${l.is_pinned ? 'Открепить' : 'Закрепить'}">${l.is_pinned ? '📌' : '📍'}</button>
                     <button class="action-btn" onclick="duplicateLog(${l.id})" title="Дублировать">📋</button>
                     <button class="action-btn" onclick="editLog(${l.id})">✏️</button>
@@ -696,6 +697,7 @@ function renderWorkersGrid() {
                 <span class="worker-card-name">👤 ${esc(w.name)}</span>
                 <span class="worker-level">⭐ Ур.${w.level || 1}</span>
                 <div class="actions" onclick="event.stopPropagation()">
+                    <button class="action-btn" onclick="openWorkerStatsModal(${w.id}, '${esc(w.name)}')" title="Статистика">📊</button>
                     <button class="action-btn" onclick="editWorker(${w.id})">✏️</button>
                     <button class="action-btn" onclick="deleteWorker(${w.id})">🗑️</button>
                 </div>
@@ -1140,6 +1142,130 @@ async function duplicateLog(id) {
         loadLogs();
         loadStats();
     }
+}
+
+// ============ NOTES ============
+
+let currentNotesLogId = null;
+
+async function openNotesModal(logId, logNumber) {
+    currentNotesLogId = logId;
+    document.getElementById('notesLogNumber').textContent = `#${logNumber}`;
+    document.getElementById('noteText').value = '';
+    document.getElementById('notesModal').classList.add('active');
+    await loadNotes();
+}
+
+function closeNotesModal() {
+    document.getElementById('notesModal').classList.remove('active');
+    currentNotesLogId = null;
+}
+
+async function loadNotes() {
+    if (!currentNotesLogId) return;
+    const notes = await api('GET', `/api/logs/${currentNotesLogId}/notes`) || [];
+    const el = document.getElementById('notesList');
+    
+    if (!notes.length) {
+        el.innerHTML = '<div class="empty-state">Нет заметок</div>';
+        return;
+    }
+    
+    el.innerHTML = notes.map(n => `
+        <div class="note-item">
+            <div class="note-header">
+                <span class="note-author">👤 ${esc(n.user_name)}</span>
+                <span class="note-date">${formatDate(n.created_at)}</span>
+                <button class="action-btn action-btn-sm" onclick="deleteNote(${n.id})">🗑️</button>
+            </div>
+            <div class="note-text">${esc(n.text)}</div>
+        </div>
+    `).join('');
+}
+
+async function addNote() {
+    const text = document.getElementById('noteText').value.trim();
+    if (!text) return;
+    
+    const result = await api('POST', `/api/logs/${currentNotesLogId}/notes`, { text });
+    if (result?.ok) {
+        document.getElementById('noteText').value = '';
+        await loadNotes();
+        showToast('💬 Заметка добавлена');
+    }
+}
+
+async function deleteNote(noteId) {
+    if (!confirm('Удалить заметку?')) return;
+    const result = await api('DELETE', `/api/notes/${noteId}`);
+    if (result?.ok) {
+        await loadNotes();
+        showToast('🗑️ Заметка удалена');
+    }
+}
+
+function formatDate(isoDate) {
+    if (!isoDate) return '';
+    const d = new Date(isoDate);
+    return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+// ============ WORKER STATS MODAL ============
+
+let workerStatsChart = null;
+
+async function openWorkerStatsModal(workerId, workerName) {
+    document.getElementById('workerStatsName').textContent = workerName;
+    document.getElementById('workerStatsModal').classList.add('active');
+    
+    const data = await api('GET', `/api/workers/${workerId}/stats`);
+    if (!data) return;
+    
+    // Заполняем статистику
+    document.getElementById('wsToday').textContent = data.today_logs;
+    document.getElementById('wsWeek').textContent = data.week_logs;
+    document.getElementById('wsMonth').textContent = data.month_logs;
+    document.getElementById('wsProfit').textContent = data.total_profit;
+    
+    // Теги
+    const tagsEl = document.getElementById('wsTagsGrid');
+    const tagColors = { fat: '#ef4444', poor: '#a855f7', medium: '#3b82f6', salary: '#22c55e' };
+    const tagNames = { fat: '🔥 Жир', poor: '💸 Нищий', medium: '📊 Средний', salary: '💰 Есть ЗП' };
+    tagsEl.innerHTML = Object.entries(data.by_tag || {}).map(([tag, count]) => 
+        `<div class="ws-tag" style="border-color: ${tagColors[tag] || '#8b5cf6'}">${tagNames[tag] || tag}: ${count}</div>`
+    ).join('') || '<div class="empty-state">Нет логов</div>';
+    
+    // График
+    const ctx = document.getElementById('workerChart').getContext('2d');
+    if (workerStatsChart) workerStatsChart.destroy();
+    
+    workerStatsChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: data.daily_data.map(d => d.date),
+            datasets: [{
+                label: 'Логов',
+                data: data.daily_data.map(d => d.count),
+                backgroundColor: 'rgba(139, 92, 246, 0.6)',
+                borderColor: '#8b5cf6',
+                borderWidth: 1,
+                borderRadius: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { beginAtZero: true, ticks: { stepSize: 1, color: '#94a3b8' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                x: { ticks: { color: '#94a3b8' }, grid: { display: false } }
+            }
+        }
+    });
+}
+
+function closeWorkerStatsModal() {
+    document.getElementById('workerStatsModal').classList.remove('active');
 }
 
 // Search
