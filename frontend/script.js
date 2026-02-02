@@ -781,14 +781,16 @@ function renderLogsTable() {
         return; 
     }
     
-    // Сортировка: закреплённые всегда сверху, затем по дате (новые сверху)
-    let sortedLogs = [...logs].sort((a, b) => {
-        // Закреплённые сверху
-        if (a.is_pinned && !b.is_pinned) return -1;
-        if (!a.is_pinned && b.is_pinned) return 1;
-        
-        // Затем по выбранному столбцу
-        if (sortColumn) {
+    // Сортировка: только если пользователь выбрал столбец
+    // По умолчанию используем порядок с бэкенда (закреплённые + новые сверху)
+    let sortedLogs = logs;
+    
+    if (sortColumn) {
+        sortedLogs = [...logs].sort((a, b) => {
+            // Закреплённые всегда сверху
+            if (a.is_pinned && !b.is_pinned) return -1;
+            if (!a.is_pinned && b.is_pinned) return 1;
+            
             let valA = a[sortColumn] || '';
             let valB = b[sortColumn] || '';
             
@@ -798,17 +800,10 @@ function renderLogsTable() {
             if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
             if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
             return 0;
-        }
-        
-        // По умолчанию: новые сверху (по дате создания DESC)
-        const dateA = new Date(a.created_at || 0);
-        const dateB = new Date(b.created_at || 0);
-        return dateB - dateA;
-    });
+        });
+    }
     
-    logs = sortedLogs;
-    
-    el.innerHTML = logs.map(l => `
+    el.innerHTML = sortedLogs.map(l => `
         <tr class="${selectedLogs.has(l.id) ? 'selected' : ''} ${l.is_archived ? 'archived' : ''} ${l.is_pinned ? 'pinned' : ''} clickable-row" onclick="openLogDetailModal(${l.id}, event)">
             <td onclick="event.stopPropagation()"><input type="checkbox" class="log-checkbox" data-id="${l.id}" ${selectedLogs.has(l.id) ? 'checked' : ''} onchange="toggleLogSelect(${l.id})"></td>
             <td class="cell-mono cell-muted">#${l.id}</td>
