@@ -1579,17 +1579,22 @@ async def sync_geelark(data: dict = None, user: User = Depends(get_current_user)
         group_name = group.get("name", "")
         
         worker_id = None
+        
+        # 1. Сначала проверяем маппинг группы
         if group_id and group_id in group_mappings:
             worker_id = group_mappings[group_id]
-        elif settings.default_worker_id:
+        
+        # 2. Если нет маппинга — используем воркера по умолчанию
+        if not worker_id and settings.default_worker_id:
             worker_id = settings.default_worker_id
         
-        # Собираем новые группы
+        # Собираем новые группы (для информации)
         if group_id and group_id not in group_mappings:
             new_groups.add((group_id, group_name))
         
+        # Если воркер не определён — пропускаем
         if not worker_id:
-            errors.append(f"Телефон {phone.get('serialNo')}: не найден воркер для группы '{group_name}'")
+            errors.append(f"Телефон {phone.get('serialNo')}: выберите воркера по умолчанию")
             continue
         
         # Парсим данные
