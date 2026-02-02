@@ -127,6 +127,9 @@ function showApp() {
     // Hide worker select in log form for workers
     document.getElementById('logWorkerGroup').style.display = isAdmin ? 'block' : 'none';
     
+    // Update mobile UI
+    updateMobileUI();
+    
     loadWorkers().then(() => switchView('dashboard'));
 }
 
@@ -630,8 +633,18 @@ function switchView(view) {
     }
     
     currentView = view;
+    
+    // Update sidebar nav
     document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === view));
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    
+    // Update bottom nav
+    document.querySelectorAll('.bottom-nav-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.view === view);
+    });
+    
+    // Close mobile menu
+    closeMobileMenu();
     
     const titles = {
         dashboard: ['Dashboard', 'Общая статистика'],
@@ -796,6 +809,46 @@ function showConfetti() {
         confetti.style.borderRadius = Math.random() > 0.5 ? '50%' : '0';
         document.body.appendChild(confetti);
         setTimeout(() => confetti.remove(), 5000);
+    }
+}
+
+// ============ MOBILE MENU ============
+
+function toggleMobileMenu() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    const burger = document.getElementById('burgerBtn');
+    
+    sidebar.classList.toggle('open');
+    overlay.classList.toggle('active');
+    burger.classList.toggle('active');
+}
+
+function closeMobileMenu() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    const burger = document.getElementById('burgerBtn');
+    
+    sidebar.classList.remove('open');
+    overlay.classList.remove('active');
+    burger.classList.remove('active');
+}
+
+function mobileNav(view) {
+    // Update bottom nav active state
+    document.querySelectorAll('.bottom-nav-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.view === view);
+    });
+    
+    switchView(view);
+}
+
+function updateMobileUI() {
+    // Hide workers in bottom nav for workers
+    const isAdmin = currentUser?.role === 'admin';
+    const bottomNavWorkers = document.getElementById('bottomNavWorkers');
+    if (bottomNavWorkers) {
+        bottomNavWorkers.style.display = isAdmin ? 'flex' : 'none';
     }
 }
 

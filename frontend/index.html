@@ -40,7 +40,20 @@
 
     <!-- App -->
     <div class="app" id="appScreen" style="display:none">
-        <aside class="sidebar">
+        <!-- Mobile Header -->
+        <div class="mobile-header">
+            <span class="mobile-logo">⚡ LogsTracker</span>
+            <button class="burger-btn" id="burgerBtn" onclick="toggleMobileMenu()">
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
+        </div>
+
+        <!-- Sidebar Overlay -->
+        <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeMobileMenu()"></div>
+
+        <aside class="sidebar" id="sidebar">
             <div class="logo">
                 <span class="logo-icon">⚡</span>
                 <span class="logo-text">LogsTracker</span>
@@ -304,6 +317,31 @@
             </form>
         </div>
     </div>
+
+    <!-- Bottom Navigation (Mobile) -->
+    <nav class="bottom-nav" id="bottomNav">
+        <div class="bottom-nav-items">
+            <a href="#" class="bottom-nav-item active" data-view="dashboard" onclick="mobileNav('dashboard')">
+                <span>🏠</span>
+                Главная
+            </a>
+            <a href="#" class="bottom-nav-item" data-view="logs" onclick="mobileNav('logs')">
+                <span>📋</span>
+                Логи
+            </a>
+            <a href="#" class="bottom-nav-item" data-view="workers" id="bottomNavWorkers" onclick="mobileNav('workers')">
+                <span>👥</span>
+                Воркеры
+            </a>
+            <a href="#" class="bottom-nav-item" data-view="reminders" onclick="mobileNav('reminders')">
+                <span>🔔</span>
+                Проверки
+            </a>
+        </div>
+    </nav>
+
+    <!-- FAB Button (Mobile) -->
+    <button class="fab" id="fabBtn" onclick="openLogModal()">➕</button>
 
     <script src="/script.js"></script>
 </body>
