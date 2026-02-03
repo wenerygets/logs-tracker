@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 import os
 import secrets
 
-from database import get_db, init_db
+from database import get_db, init_db, async_session
 from models import Log, Worker, LogTag, User, UserRole, Session, AuditLog, LogNote, CustomTag, GeelarkSettings, GeelarkGroupMapping, GeelarkSyncedPhone, CheckResult
 import json
 import aiohttp
@@ -2134,62 +2134,82 @@ async def start_sber_check(
     # Start background task
     active_sber_check = {"running": True, "progress": 0, "total": len(logs), "current": ""}
     
+    # Copy data for background task (logs list becomes detached after request ends)
+    logs_data = [(log.id, log.log_number, getattr(log, 'geelark_phone_id', None)) for log in logs]
+    settings_token = settings.bearer_token
+    
     async def run_checks():
         global active_sber_check
         try:
-            for i, log in enumerate(logs):
+            for i, (log_id, log_number, log_geelark_phone_id) in enumerate(logs_data):
                 active_sber_check["progress"] = i
-                active_sber_check["current"] = log.log_number
+                active_sber_check["current"] = log_number
                 
                 # Find phone for this log
-                phone_id = synced_phones.get(log.id) or log.geelark_phone_id
+                phone_id = synced_phones.get(log_id) or log_geelark_phone_id
                 
                 if not phone_id or phone_id not in phones_by_id:
                     # Try to find by log_number
                     phone = None
                     for p in all_phones:
-                        if log.log_number in p.get("serialName", "") or log.log_number in p.get("serialNo", ""):
+                        if log_number in p.get("serialName", "") or log_number in p.get("serialNo", ""):
                             phone = p
                             break
                     
                     if not phone:
-                        result_data = {
-                            "log_id": log.id,
-                            "phone_name": "",
-                            "phone_serial": "",
-                            "status": "skipped",
-                            "error_message": "Телефон не найден в Geelark"
-                        }
-                        check_result = CheckResult(**result_data)
-                        async with AsyncSession(db.get_bind()) as session:
+                        # Save skipped result
+                        async with async_session() as session:
+                            check_result = CheckResult(
+                                log_id=log_id,
+                                phone_name="",
+                                phone_serial="",
+                                status="skipped",
+                                error_message="Телефон не найден в Geelark"
+                            )
                             session.add(check_result)
                             await session.commit()
                         continue
                 else:
                     phone = phones_by_id[phone_id]
                 
-                # Process phone
-                result_data = await process_single_phone_check(log, phone, settings, db)
+                # Create a minimal log-like object for processing
+                class LogData:
+                    def __init__(self, id, log_number):
+                        self.id = id
+                        self.log_number = log_number
                 
-                # Save result
-                check_result = CheckResult(
-                    log_id=result_data["log_id"],
-                    geelark_phone_id=result_data.get("geelark_phone_id"),
-                    phone_name=result_data.get("phone_name"),
-                    phone_serial=result_data.get("phone_serial"),
-                    status=result_data["status"],
-                    error_message=result_data.get("error_message"),
-                    screenshot_url=result_data.get("screenshot_url")
-                )
-                db.add(check_result)
-                await db.commit()
+                log_obj = LogData(log_id, log_number)
+                
+                # Create settings object with token
+                class SettingsData:
+                    def __init__(self, token):
+                        self.bearer_token = token
+                
+                settings_obj = SettingsData(settings_token)
+                
+                # Process phone
+                result_data = await process_single_phone_check(log_obj, phone, settings_obj, None)
+                
+                # Save result with new session
+                async with async_session() as session:
+                    check_result = CheckResult(
+                        log_id=result_data["log_id"],
+                        geelark_phone_id=result_data.get("geelark_phone_id"),
+                        phone_name=result_data.get("phone_name"),
+                        phone_serial=result_data.get("phone_serial"),
+                        status=result_data["status"],
+                        error_message=result_data.get("error_message"),
+                        screenshot_url=result_data.get("screenshot_url")
+                    )
+                    session.add(check_result)
+                    await session.commit()
                 
                 # Wait between phones
-                if i < len(logs) - 1:
+                if i < len(logs_data) - 1:
                     await asyncio.sleep(10)
                     
         finally:
-            active_sber_check = {"running": False, "progress": len(logs), "total": len(logs), "current": "Завершено"}
+            active_sber_check = {"running": False, "progress": len(logs_data), "total": len(logs_data), "current": "Завершено"}
     
     # Run in background
     asyncio.create_task(run_checks())
