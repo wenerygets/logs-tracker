@@ -794,7 +794,7 @@ function renderLogsTable() {
     const isArchive = document.getElementById('filterArchive')?.value === 'true';
     
     if (!logs?.length) { 
-        el.innerHTML = `<tr><td colspan="${isAdmin ? 12 : 11}" class="empty-state">${isArchive ? 'Архив пуст' : 'Логов нет'}</td></tr>`; 
+        el.innerHTML = `<tr><td colspan="${isAdmin ? 9 : 8}" class="empty-state">${isArchive ? 'Архив пуст' : 'Логов нет'}</td></tr>`; 
         return; 
     }
     
@@ -839,27 +839,23 @@ function renderLogsTable() {
     
     el.innerHTML = sortedLogs.map(l => `
         <tr class="${selectedLogs.has(l.id) ? 'selected' : ''} ${l.is_archived ? 'archived' : ''} ${l.is_pinned ? 'pinned' : ''} clickable-row" onclick="openLogDetailModal(${l.id}, event)">
-            <td onclick="event.stopPropagation()"><input type="checkbox" class="log-checkbox" data-id="${l.id}" ${selectedLogs.has(l.id) ? 'checked' : ''} onchange="toggleLogSelect(${l.id})"></td>
-            <td class="cell-mono cell-muted">#${l.id}</td>
-            ${isAdmin ? `<td><strong>${esc(l.worker_name)}</strong></td>` : ''}
-            <td class="cell-mono">${esc(l.log_number)}</td>
-            <td class="cell-mono">${esc(l.balance)}</td>
-            <td class="cell-mono cell-profit">${l.profit ? `<span class="profit-badge">+${esc(l.profit)}</span>` : '—'}</td>
-            <td class="cell-owner">${l.owner ? `<span class="owner-badge">@${esc(l.owner)}</span>` : '—'}</td>
-            <td class="cell-mono cell-muted">${l.install_date||'—'}</td>
-            <td class="cell-mono cell-muted">${l.check_date||'—'}</td>
-            <td><span class="tag-badge ${l.tag}">${TAG_LABELS[l.tag]||l.tag}</span></td>
-            <td onclick="event.stopPropagation()">
-                <div class="actions">
-                    <button class="action-btn" onclick="openNotesModal(${l.id}, '${esc(l.log_number)}')" title="Заметки">💬</button>
+            <td class="td-check" onclick="event.stopPropagation()"><input type="checkbox" class="log-checkbox" data-id="${l.id}" ${selectedLogs.has(l.id) ? 'checked' : ''} onchange="toggleLogSelect(${l.id})"></td>
+            ${isAdmin ? `<td class="td-worker"><span class="worker-name">${esc(l.worker_name)}</span></td>` : ''}
+            <td class="td-log-number"><span class="log-number-badge">${esc(l.log_number)}</span></td>
+            <td class="td-balance">${l.balance && l.balance !== '0' ? `<span class="balance-value">${esc(l.balance)}</span>` : '<span class="cell-muted">—</span>'}</td>
+            <td class="td-owner">${l.owner ? `<span class="owner-badge">${esc(l.owner)}</span>` : '<span class="cell-muted">—</span>'}</td>
+            <td class="td-date">${l.install_date || '—'}</td>
+            <td class="td-date">${l.check_date || '—'}</td>
+            <td class="td-tag"><span class="tag-badge ${l.tag}">${TAG_LABELS[l.tag]||l.tag}</span></td>
+            <td class="td-actions" onclick="event.stopPropagation()">
+                <div class="actions-compact">
+                    <button class="action-btn" onclick="editLog(${l.id})" title="Редактировать">✏️</button>
                     <button class="action-btn" onclick="togglePin(${l.id})" title="${l.is_pinned ? 'Открепить' : 'Закрепить'}">${l.is_pinned ? '📌' : '📍'}</button>
-                    <button class="action-btn" onclick="duplicateLog(${l.id})" title="Дублировать">📋</button>
-                    <button class="action-btn" onclick="editLog(${l.id})">✏️</button>
                     ${l.is_archived 
                         ? `<button class="action-btn" onclick="unarchiveLog(${l.id})" title="Восстановить">📤</button>`
                         : `<button class="action-btn" onclick="archiveLog(${l.id})" title="Архив">📦</button>`
                     }
-                    <button class="action-btn" onclick="deleteLog(${l.id})">🗑️</button>
+                    <button class="action-btn action-btn-danger" onclick="deleteLog(${l.id})" title="Удалить">🗑️</button>
                 </div>
             </td>
         </tr>

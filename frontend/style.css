@@ -1031,79 +1031,148 @@ body {
 /* ============ TABLE ============ */
 .table-container {
     background: var(--bg-card);
-    backdrop-filter: blur(20px);
     border: 1px solid var(--border);
-    border-radius: 20px;
+    border-radius: 12px;
     overflow: hidden;
 }
 
 .logs-table {
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
 }
 
 .logs-table th,
 .logs-table td {
-    padding: 16px 18px;
+    padding: 12px 14px;
     text-align: left;
+    vertical-align: middle;
 }
 
 .logs-table th {
-    background: linear-gradient(180deg, rgba(139, 92, 246, 0.1) 0%, transparent 100%);
+    background: rgba(139, 92, 246, 0.06);
     color: var(--text-muted);
     font-weight: 600;
     font-size: 11px;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 0.8px;
+    white-space: nowrap;
+}
+
+.logs-table .th-check {
+    width: 40px;
+    text-align: center;
+}
+
+.logs-table .th-actions {
+    width: 130px;
+    text-align: right;
 }
 
 .logs-table tr {
     border-bottom: 1px solid var(--border);
-    transition: all 0.3s ease;
+    transition: background 0.2s ease;
 }
 
 .logs-table tbody tr:hover {
-    background: var(--bg-hover);
+    background: rgba(139, 92, 246, 0.04);
 }
 
 .logs-table td {
-    font-size: 14px;
+    font-size: 13px;
+    color: var(--text);
 }
 
-.cell-mono {
+/* Ячейки таблицы */
+.td-check {
+    width: 40px;
+    text-align: center;
+}
+
+.td-worker .worker-name {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.td-log-number {
     font-family: 'JetBrains Mono', monospace;
+}
+
+.log-number-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    background: rgba(139, 92, 246, 0.12);
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.td-balance .balance-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    color: var(--success);
+}
+
+.td-date {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.td-owner .owner-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    background: rgba(6, 182, 212, 0.12);
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--accent-secondary);
+}
+
+.td-tag .tag-badge {
+    font-size: 11px;
+    padding: 4px 10px;
+}
+
+.td-actions {
+    width: 130px;
+}
+
+.actions-compact {
+    display: flex;
+    gap: 4px;
+    justify-content: flex-end;
+}
+
+.actions-compact .action-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.actions-compact .action-btn:hover {
+    background: rgba(139, 92, 246, 0.15);
+    border-color: rgba(139, 92, 246, 0.3);
+}
+
+.actions-compact .action-btn-danger:hover {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.3);
 }
 
 .cell-muted {
     color: var(--text-muted);
-}
-
-.cell-owner {
-    font-size: 13px;
-}
-
-.owner-badge {
-    display: inline-block;
-    padding: 4px 10px;
-    background: linear-gradient(135deg, rgba(6, 182, 212, 0.2) 0%, rgba(139, 92, 246, 0.1) 100%);
-    border: 1px solid rgba(6, 182, 212, 0.3);
-    border-radius: 8px;
     font-size: 12px;
-    font-weight: 500;
-    color: var(--accent-secondary);
-    font-family: 'JetBrains Mono', monospace;
-}
-
-.profit-badge {
-    display: inline-block;
-    padding: 4px 10px;
-    background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(52, 211, 153, 0.1) 100%);
-    border: 1px solid rgba(16, 185, 129, 0.3);
-    border-radius: 8px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--success);
-    font-family: 'JetBrains Mono', monospace;
 }
 
 .stat-card.stat-profit {
@@ -1613,37 +1682,29 @@ body.light-theme .logs-table tr:hover {
 /* ============ TAG BADGE ============ */
 .tag-badge {
     display: inline-block;
-    padding: 6px 14px;
-    border-radius: 20px;
-    font-size: 12px;
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 11px;
     font-weight: 600;
-    animation: badgePulse 2s ease-in-out infinite;
-}
-
-@keyframes badgePulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.8; }
+    letter-spacing: 0.3px;
+    white-space: nowrap;
 }
 
 .tag-badge.fat { 
-    background: linear-gradient(135deg, rgba(239,68,68,0.2) 0%, rgba(248,113,113,0.1) 100%); 
+    background: rgba(239, 68, 68, 0.15);
     color: #f87171;
-    border: 1px solid rgba(239,68,68,0.3);
 }
 .tag-badge.poor { 
-    background: rgba(107,107,128,0.15); 
-    color: var(--text-muted);
-    border: 1px solid rgba(107,107,128,0.3);
+    background: rgba(107, 114, 128, 0.15);
+    color: #9ca3af;
 }
 .tag-badge.medium { 
-    background: linear-gradient(135deg, rgba(139,92,246,0.2) 0%, rgba(6,182,212,0.1) 100%); 
-    color: var(--accent);
-    border: 1px solid rgba(139,92,246,0.3);
+    background: rgba(139, 92, 246, 0.15);
+    color: #a78bfa;
 }
 .tag-badge.salary { 
-    background: linear-gradient(135deg, rgba(16,185,129,0.2) 0%, rgba(52,211,153,0.1) 100%); 
+    background: rgba(16, 185, 129, 0.15);
     color: #34d399;
-    border: 1px solid rgba(16,185,129,0.3);
 }
 
 /* ============ ACTIONS ============ */

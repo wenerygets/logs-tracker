@@ -235,17 +235,15 @@
                         <table class="logs-table">
                             <thead>
                                 <tr>
-                                    <th><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
-                                    <th class="sortable" onclick="sortLogs('id')">#</th>
+                                    <th class="th-check"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
                                     <th id="thWorker" class="sortable" onclick="sortLogs('worker_name')">Воркер</th>
                                     <th class="sortable" onclick="sortLogs('log_number')">№ Лога</th>
                                     <th class="sortable" onclick="sortLogs('balance')">Баланс</th>
-                                    <th class="sortable" onclick="sortLogs('profit')">Профит</th>
                                     <th class="sortable" onclick="sortLogs('owner')">Владелец</th>
                                     <th class="sortable" onclick="sortLogs('install_date')">Установка</th>
                                     <th class="sortable" onclick="sortLogs('check_date')">Проверка</th>
                                     <th class="sortable" onclick="sortLogs('tag')">Тег</th>
-                                    <th>Действия</th>
+                                    <th class="th-actions">Действия</th>
                                 </tr>
                             </thead>
                             <tbody id="logsTableBody"></tbody>
