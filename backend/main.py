@@ -2131,12 +2131,12 @@ async def start_sber_check(
     
     phones_by_id = {p["id"]: p for p in all_phones}
     
-    # Start background task
-    active_sber_check = {"running": True, "progress": 0, "total": len(logs_data), "current": "Запуск..."}
-    
     # Copy data for background task (logs list becomes detached after request ends)
     logs_data = [(log.id, log.log_number, getattr(log, 'geelark_phone_id', None)) for log in logs]
     settings_token = settings.bearer_token
+    
+    # Start background task
+    active_sber_check = {"running": True, "progress": 0, "total": len(logs_data), "current": "Запуск..."}
     
     async def run_checks():
         global active_sber_check
