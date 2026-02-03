@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Query, Header
+from fastapi import FastAPI, Depends, HTTPException, Query, Header, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -2075,7 +2075,7 @@ async def clear_sber_check_results(user: User = Depends(get_current_user), db: A
 
 @app.post("/api/sber-check/start")
 async def start_sber_check(
-    log_ids: list[int],
+    log_ids: list[int] = Body(...),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
