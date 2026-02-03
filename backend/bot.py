@@ -110,7 +110,8 @@ async def api_req(method, endpoint, data=None, user_data=None):
         try:
             if method == "GET":
                 params = data or {}
-                if user_data and user_data.get("worker_id"):
+                # Для воркера фильтруем по worker_id, для админа - все логи
+                if user_data and user_data.get("worker_id") and user_data.get("role") != "admin":
                     params["worker_id"] = user_data["worker_id"]
                 async with s.get(url, params=params) as r:
                     return await r.json() if r.status == 200 else None

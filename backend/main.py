@@ -1174,13 +1174,17 @@ async def bot_auth(data: dict, db: AsyncSession = Depends(get_db)):
 
 @app.get("/api/bot/logs")
 async def bot_get_logs(
-    worker_id: int,
+    worker_id: Optional[int] = None,
     search: Optional[str] = None,
     limit: int = 100,
     db: AsyncSession = Depends(get_db)
 ):
-    """Логи для бота (без авторизации, по worker_id)"""
-    query = select(Log).options(selectinload(Log.worker)).where(Log.worker_id == worker_id)
+    """Логи для бота (без авторизации, по worker_id или все для админа)"""
+    query = select(Log).options(selectinload(Log.worker)).where(Log.is_archived == False)
+    
+    # Фильтр по воркеру (если указан)
+    if worker_id:
+        query = query.where(Log.worker_id == worker_id)
     
     if search:
         query = query.where(or_(
