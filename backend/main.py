@@ -341,6 +341,39 @@ async def get_log(log_id: int, user: User = Depends(get_current_user), db: Async
     return log.to_dict()
 
 
+def auto_tag_by_balance(balance_str: str) -> str:
+    """Автоматически определяет тег по балансу"""
+    if not balance_str:
+        return "medium"
+    
+    try:
+        # Парсим баланс: "50к" -> 50, "1.5кк" -> 1500, "100" -> 0.1
+        balance_str = balance_str.lower().replace(' ', '').replace(',', '.')
+        
+        if 'кк' in balance_str or 'kk' in balance_str:
+            num = float(balance_str.replace('кк', '').replace('kk', ''))
+            balance_k = num * 1000  # в тысячах
+        elif 'к' in balance_str or 'k' in balance_str:
+            num = float(balance_str.replace('к', '').replace('k', ''))
+            balance_k = num  # уже в тысячах
+        else:
+            # Просто число — считаем что это тысячи если > 100, иначе единицы
+            num = float(balance_str)
+            balance_k = num if num < 100 else num / 1000
+        
+        # Определяем тег по балансу
+        if balance_k >= 100:  # >= 100к
+            return "fat"
+        elif balance_k >= 30:  # >= 30к
+            return "medium"
+        elif balance_k >= 10:  # >= 10к
+            return "salary"
+        else:  # < 10к
+            return "poor"
+    except:
+        return "medium"
+
+
 @app.post("/api/logs")
 async def create_log(data: dict, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     # Воркер может создавать только свои логи
@@ -351,15 +384,21 @@ async def create_log(data: dict, user: User = Depends(get_current_user), db: Asy
         else:
             raise HTTPException(status_code=403, detail="Воркер не привязан")
     
+    # Авто-тег по балансу если тег не указан явно
+    balance = data.get("balance", "0")
+    tag = data.get("tag")
+    if not tag or tag == "medium":
+        tag = auto_tag_by_balance(balance)
+    
     log = Log(
         worker_id=worker_id,
         log_number=data["log_number"],
-        balance=data.get("balance", "0"),
+        balance=balance,
         profit=data.get("profit"),
         owner=data.get("owner"),
         install_date=data["install_date"],
         check_date=data.get("check_date"),
-        tag=data.get("tag", "medium"),
+        tag=tag,
         comment=data.get("comment")
     )
     db.add(log)
@@ -1211,8 +1250,12 @@ async def bot_create_log(data: dict, db: AsyncSession = Depends(get_db)):
     if check_date in ["-", "", None]:
         check_date = None
     
-    # Конвертируем tag в enum
-    tag_str = data.get("tag", "medium").lower()
+    # Авто-тег по балансу если тег не указан
+    balance = data.get("balance", "0")
+    tag_str = data.get("tag", "").lower()
+    if not tag_str or tag_str == "medium":
+        tag_str = auto_tag_by_balance(balance)
+    
     try:
         tag = LogTag(tag_str)
     except ValueError:
@@ -1221,7 +1264,7 @@ async def bot_create_log(data: dict, db: AsyncSession = Depends(get_db)):
     log = Log(
         worker_id=worker_id,
         log_number=data["log_number"],
-        balance=data.get("balance", "0"),
+        balance=balance,
         profit=data.get("profit"),
         owner=data.get("owner"),
         install_date=data["install_date"],
@@ -1661,9 +1704,13 @@ async def sync_geelark(data: dict = None, user: User = Depends(get_current_user)
         # Парсим оба поля вместе
         parsed = parse_geelark_data(serial_name, remark)
         
-        # Определяем тег
+        # Определяем тег — если не распознан, используем авто-тег по балансу
+        tag_str = parsed["tag"]
+        if not tag_str or tag_str == "medium":
+            tag_str = auto_tag_by_balance(parsed["balance"])
+        
         try:
-            tag = LogTag(parsed["tag"])
+            tag = LogTag(tag_str)
         except ValueError:
             tag = LogTag.MEDIUM
         
