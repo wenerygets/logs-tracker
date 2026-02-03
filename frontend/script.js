@@ -1893,6 +1893,8 @@ function updateGeelarkWorkerSelects() {
 // ============ SBER CHECK ============
 
 let sberCheckInterval = null;
+let sberCheckLogs = [];
+let sberCheckTotal = 0;
 
 async function startSberCheck() {
     const selected = Array.from(document.querySelectorAll('.log-checkbox:checked'))
@@ -1915,6 +1917,13 @@ async function startSberCheck() {
         showToast('✅ Проверка запущена!');
         clearSelection();
         switchView('sbercheck');
+        
+        // Show logs list
+        if (result.logs) {
+            sberCheckLogs = result.logs;
+            sberCheckTotal = result.total;
+        }
+        
         startSberStatusPolling();
     } else {
         showToast('❌ ' + (result?.detail || 'Ошибка запуска'), 'error');
@@ -1927,6 +1936,20 @@ function startSberStatusPolling() {
     
     // Show progress
     document.getElementById('sberCheckProgress').style.display = 'block';
+    
+    // Show logs list
+    let logsListHtml = '';
+    if (sberCheckLogs.length > 0) {
+        logsListHtml = `
+            <div style="margin-top:15px;padding:10px;background:var(--bg-card);border-radius:8px;max-height:150px;overflow-y:auto">
+                <strong>Логи на проверку (${sberCheckTotal}):</strong>
+                <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px">
+                    ${sberCheckLogs.map(l => `<span style="padding:3px 8px;background:var(--bg-hover);border-radius:4px;font-size:12px">#${esc(l.log_number)}</span>`).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
     document.getElementById('sberCheckStatus').innerHTML = `
         <div class="sber-status-running">
             <div class="spinner"></div>
@@ -1935,6 +1958,7 @@ function startSberStatusPolling() {
                 <p style="margin:5px 0 0;color:var(--text-muted)">Не закрывайте страницу</p>
             </div>
         </div>
+        ${logsListHtml}
     `;
     
     // Poll status
@@ -1942,10 +1966,14 @@ function startSberStatusPolling() {
         const status = await api('GET', '/api/sber-check/status');
         
         if (status) {
-            const progress = status.total > 0 ? (status.progress / status.total) * 100 : 0;
-            document.getElementById('sberProgressFill').style.width = progress + '%';
-            document.getElementById('sberProgressText').textContent = `${status.progress} / ${status.total}`;
-            document.getElementById('sberProgressCurrent').textContent = status.current || '';
+            const total = status.total || sberCheckTotal || 1;
+            const progress = total > 0 ? ((status.progress + 1) / total) * 100 : 0;
+            document.getElementById('sberProgressFill').style.width = Math.min(progress, 100) + '%';
+            document.getElementById('sberProgressText').textContent = `${status.progress + 1} / ${total}`;
+            document.getElementById('sberProgressCurrent').textContent = status.current ? `Текущий: ${status.current}` : '';
+            
+            // Also refresh results
+            loadSberResults();
             
             if (!status.running) {
                 clearInterval(sberCheckInterval);
@@ -1958,6 +1986,9 @@ function startSberStatusPolling() {
                     </div>
                 `;
                 
+                document.getElementById('sberProgressFill').style.width = '100%';
+                document.getElementById('sberProgressText').textContent = `${total} / ${total}`;
+                
                 showToast('✅ Проверка завершена!');
                 showConfetti();
                 loadSberResults();
@@ -1965,7 +1996,7 @@ function startSberStatusPolling() {
         }
     }, 3000);
     
-    // Also load results periodically
+    // Load initial results
     loadSberResults();
 }
 

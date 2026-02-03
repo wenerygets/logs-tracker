@@ -2149,10 +2149,15 @@ async def start_sber_check(
                 phone_id = synced_phones.get(log_id) or log_geelark_phone_id
                 
                 if not phone_id or phone_id not in phones_by_id:
-                    # Try to find by log_number
+                    # Try to find by log_number matching serialNo (phone number in Geelark)
                     phone = None
                     for p in all_phones:
-                        if log_number in p.get("serialName", "") or log_number in p.get("serialNo", ""):
+                        # Match by serialNo (exact match)
+                        if p.get("serialNo") == log_number or p.get("serialNo") == str(log_number):
+                            phone = p
+                            break
+                        # Match by log_number in serialName
+                        if log_number in p.get("serialName", ""):
                             phone = p
                             break
                     
@@ -2214,7 +2219,12 @@ async def start_sber_check(
     # Run in background
     asyncio.create_task(run_checks())
     
-    return {"ok": True, "message": f"Проверка запущена для {len(logs)} логов"}
+    return {
+        "ok": True, 
+        "message": f"Проверка запущена для {len(logs)} логов",
+        "logs": [{"id": l[0], "log_number": l[1]} for l in logs_data],
+        "total": len(logs_data)
+    }
 
 
 @app.get("/api/sber-check/status")
