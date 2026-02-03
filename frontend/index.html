@@ -338,38 +338,31 @@
 
                 <!-- Sber Check Results -->
                 <div class="view" id="sbercheckView">
-                    <div class="card sber-check-card">
-                        <div class="sber-check-header">
-                            <h3>💳 Проверка балансов Sberbank</h3>
-                            <div class="sber-check-actions">
-                                <button class="btn btn-secondary" onclick="refreshSberResults()">🔄 Обновить</button>
-                                <button class="btn btn-danger" onclick="clearSberResults()">🗑️ Очистить</button>
+                    <div class="sber-page">
+                        <!-- Status Card -->
+                        <div class="sber-status-card" id="sberStatusCard">
+                            <div class="sber-status-content" id="sberCheckStatus">
+                                <div class="sber-idle">
+                                    <div class="sber-idle-icon">💳</div>
+                                    <h3>Проверка балансов</h3>
+                                    <p>Выберите логи во вкладке "Все логи" и нажмите "💳 Проверить Sber"</p>
+                                </div>
                             </div>
                         </div>
                         
-                        <div class="sber-check-status" id="sberCheckStatus">
-                            <div class="sber-status-idle">
-                                <span>⏸️</span>
-                                <p>Выберите логи во вкладке "Все логи" и нажмите "Проверить Sber"</p>
+                        <!-- Results Section -->
+                        <div class="sber-results-section">
+                            <div class="sber-results-header">
+                                <div class="sber-results-title">
+                                    <h3>Результаты</h3>
+                                    <div class="sber-stats" id="sberResultsSummary"></div>
+                                </div>
+                                <div class="sber-results-actions">
+                                    <button class="btn-icon" onclick="refreshSberResults()" title="Обновить">🔄</button>
+                                    <button class="btn-icon btn-icon-danger" onclick="clearSberResults()" title="Очистить">🗑️</button>
+                                </div>
                             </div>
-                        </div>
-                        
-                        <div class="sber-check-progress" id="sberCheckProgress" style="display:none">
-                            <div class="progress-bar">
-                                <div class="progress-fill" id="sberProgressFill"></div>
-                            </div>
-                            <div class="progress-text">
-                                <span id="sberProgressText">0 / 0</span>
-                                <span id="sberProgressCurrent"></span>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div class="card sber-results-card">
-                        <h3>📊 Результаты проверки</h3>
-                        <div class="sber-results-summary" id="sberResultsSummary"></div>
-                        <div class="sber-results-grid" id="sberResultsGrid">
-                            <div class="empty-state">Нет результатов</div>
+                            <div class="sber-results-list" id="sberResultsGrid"></div>
                         </div>
                     </div>
                 </div>
