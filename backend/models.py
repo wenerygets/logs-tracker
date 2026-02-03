@@ -242,6 +242,37 @@ class GeelarkSyncedPhone(Base):
     log = relationship("Log")
 
 
+class CheckResult(Base):
+    """Результат проверки баланса Sberbank"""
+    __tablename__ = "check_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    log_id = Column(Integer, ForeignKey("logs.id"), nullable=False)
+    geelark_phone_id = Column(String(100), nullable=True)
+    phone_name = Column(String(255), nullable=True)
+    phone_serial = Column(String(50), nullable=True)
+    status = Column(String(20), nullable=False)  # success, error, skipped
+    error_message = Column(Text, nullable=True)
+    screenshot_url = Column(Text, nullable=True)  # Base64 or URL
+    checked_at = Column(DateTime, default=func.now())
+    
+    log = relationship("Log")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "log_id": self.log_id,
+            "log_number": self.log.log_number if self.log else None,
+            "geelark_phone_id": self.geelark_phone_id,
+            "phone_name": self.phone_name,
+            "phone_serial": self.phone_serial,
+            "status": self.status,
+            "error_message": self.error_message,
+            "screenshot_url": self.screenshot_url,
+            "checked_at": self.checked_at.isoformat() if self.checked_at else None
+        }
+
+
 class Log(Base):
     """Лог"""
     __tablename__ = "logs"
@@ -250,6 +281,9 @@ class Log(Base):
     worker_id = Column(Integer, ForeignKey("workers.id"), nullable=False)
     worker = relationship("Worker", back_populates="logs")
     notes = relationship("LogNote", back_populates="log", cascade="all, delete-orphan")
+    
+    # Связь с Geelark
+    geelark_phone_id = Column(String(100), nullable=True)
 
     log_number = Column(String(50), nullable=False)
     pin = Column(String(100), nullable=True)  # Deprecated, kept for compatibility

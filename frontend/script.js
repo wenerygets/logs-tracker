@@ -138,9 +138,10 @@ function showApp() {
         <small>${isAdmin ? '👑 Админ' : '👤 Воркер'}</small>
     `;
     
-    // Hide workers and geelark nav for workers
+    // Hide admin-only nav items for workers
     document.getElementById('navWorkers').style.display = isAdmin ? 'flex' : 'none';
     document.getElementById('navGeelark').style.display = isAdmin ? 'flex' : 'none';
+    document.getElementById('navSberCheck').style.display = isAdmin ? 'flex' : 'none';
     
     // Hide workers card in stats
     document.getElementById('statWorkersCard').style.display = isAdmin ? 'flex' : 'none';
@@ -924,8 +925,8 @@ function updateWorkerSelects() {
 
 // Navigation
 function switchView(view) {
-    // Workers and Geelark view only for admin
-    if ((view === 'workers' || view === 'geelark') && currentUser.role !== 'admin') {
+    // Admin-only views
+    if ((view === 'workers' || view === 'geelark' || view === 'sbercheck') && currentUser.role !== 'admin') {
         view = 'dashboard';
     }
     
@@ -948,10 +949,11 @@ function switchView(view) {
         logs: ['Все логи', currentUser.role === 'admin' ? 'Управление логами' : 'Мои логи'],
         workers: ['Воркеры', 'Управление воркерами'],
         reminders: ['Проверки', 'Логи на проверку'],
-        geelark: ['Geelark', 'Интеграция с Geelark']
+        geelark: ['Geelark', 'Интеграция с Geelark'],
+        sbercheck: ['Проверка Sber', 'Результаты проверки балансов']
     };
-    document.getElementById('pageTitle').textContent = titles[view][0];
-    document.getElementById('pageSubtitle').textContent = titles[view][1];
+    document.getElementById('pageTitle').textContent = titles[view]?.[0] || view;
+    document.getElementById('pageSubtitle').textContent = titles[view]?.[1] || '';
     
     document.getElementById(view + 'View').classList.add('active');
     
@@ -960,6 +962,7 @@ function switchView(view) {
     else if (view === 'workers') { loadWorkers().then(() => renderWorkersGrid()); }
     else if (view === 'reminders') { loadReminders(reminderDays); }
     else if (view === 'geelark') { loadGeelarkSettings(); }
+    else if (view === 'sbercheck') { loadSberResults(); }
 }
 
 // Log Modal
@@ -1885,6 +1888,181 @@ function updateGeelarkWorkerSelects() {
         newMappingWorkerSelect.innerHTML = '<option value="">Воркер</option>' + opts;
     }
 }
+
+
+// ============ SBER CHECK ============
+
+let sberCheckInterval = null;
+
+async function startSberCheck() {
+    const selected = Array.from(document.querySelectorAll('.log-checkbox:checked'))
+        .map(cb => parseInt(cb.dataset.id));
+    
+    if (selected.length === 0) {
+        showToast('Выберите логи для проверки', 'error');
+        return;
+    }
+    
+    if (!confirm(`Запустить проверку ${selected.length} логов?\n\nЭто может занять несколько минут.`)) {
+        return;
+    }
+    
+    showToast(`🚀 Запуск проверки ${selected.length} логов...`);
+    
+    const result = await api('POST', '/api/sber-check/start', selected);
+    
+    if (result?.ok) {
+        showToast('✅ Проверка запущена!');
+        clearSelection();
+        switchView('sbercheck');
+        startSberStatusPolling();
+    } else {
+        showToast('❌ ' + (result?.detail || 'Ошибка запуска'), 'error');
+    }
+}
+
+function startSberStatusPolling() {
+    // Clear existing interval
+    if (sberCheckInterval) clearInterval(sberCheckInterval);
+    
+    // Show progress
+    document.getElementById('sberCheckProgress').style.display = 'block';
+    document.getElementById('sberCheckStatus').innerHTML = `
+        <div class="sber-status-running">
+            <div class="spinner"></div>
+            <div>
+                <strong>Проверка выполняется...</strong>
+                <p style="margin:5px 0 0;color:var(--text-muted)">Не закрывайте страницу</p>
+            </div>
+        </div>
+    `;
+    
+    // Poll status
+    sberCheckInterval = setInterval(async () => {
+        const status = await api('GET', '/api/sber-check/status');
+        
+        if (status) {
+            const progress = status.total > 0 ? (status.progress / status.total) * 100 : 0;
+            document.getElementById('sberProgressFill').style.width = progress + '%';
+            document.getElementById('sberProgressText').textContent = `${status.progress} / ${status.total}`;
+            document.getElementById('sberProgressCurrent').textContent = status.current || '';
+            
+            if (!status.running) {
+                clearInterval(sberCheckInterval);
+                sberCheckInterval = null;
+                
+                document.getElementById('sberCheckStatus').innerHTML = `
+                    <div class="sber-status-idle">
+                        <span>✅</span>
+                        <p>Проверка завершена</p>
+                    </div>
+                `;
+                
+                showToast('✅ Проверка завершена!');
+                showConfetti();
+                loadSberResults();
+            }
+        }
+    }, 3000);
+    
+    // Also load results periodically
+    loadSberResults();
+}
+
+async function loadSberResults() {
+    const data = await api('GET', '/api/sber-check/results');
+    
+    if (!data) return;
+    
+    // Update status if check is active
+    if (data.active?.running) {
+        startSberStatusPolling();
+    }
+    
+    const results = data.results || [];
+    
+    // Summary
+    const success = results.filter(r => r.status === 'success').length;
+    const errors = results.filter(r => r.status === 'error').length;
+    const skipped = results.filter(r => r.status === 'skipped').length;
+    
+    document.getElementById('sberResultsSummary').innerHTML = results.length > 0 ? `
+        <div class="sber-summary-item success">✅ Успешно: ${success}</div>
+        <div class="sber-summary-item error">❌ Ошибки: ${errors}</div>
+        <div class="sber-summary-item skipped">⏭️ Пропущено: ${skipped}</div>
+    ` : '';
+    
+    // Results grid
+    const grid = document.getElementById('sberResultsGrid');
+    
+    if (results.length === 0) {
+        grid.innerHTML = '<div class="empty-state">Нет результатов</div>';
+        return;
+    }
+    
+    grid.innerHTML = results.map(r => `
+        <div class="sber-result-item ${r.status}">
+            <div class="sber-result-header">
+                <span class="sber-result-phone">#${esc(r.phone_serial || '?')} - ${esc(r.phone_name || 'N/A')}</span>
+                <span class="sber-result-status ${r.status}">
+                    ${r.status === 'success' ? '✅' : r.status === 'error' ? '❌' : '⏭️'}
+                    ${r.status === 'success' ? 'Успешно' : r.status === 'error' ? 'Ошибка' : 'Пропущено'}
+                </span>
+            </div>
+            <div class="sber-result-body">
+                <div class="sber-result-info">
+                    <span>📋 Лог: ${esc(r.log_number || 'N/A')}</span>
+                    <span>🕐 ${formatDate(r.checked_at)}</span>
+                </div>
+                ${r.error_message ? `<div class="sber-result-error">${esc(r.error_message)}</div>` : ''}
+                ${r.screenshot_url ? `
+                    <div class="sber-result-screenshot">
+                        <img src="${r.screenshot_url}" alt="Screenshot" onclick="openScreenshot(this.src)">
+                    </div>
+                ` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+async function refreshSberResults() {
+    showToast('🔄 Обновление...');
+    await loadSberResults();
+    showToast('✅ Обновлено');
+}
+
+async function clearSberResults() {
+    if (!confirm('Очистить все результаты проверки?')) return;
+    
+    const result = await api('DELETE', '/api/sber-check/results');
+    
+    if (result?.ok) {
+        showToast('🗑️ Результаты очищены');
+        document.getElementById('sberResultsGrid').innerHTML = '<div class="empty-state">Нет результатов</div>';
+        document.getElementById('sberResultsSummary').innerHTML = '';
+        document.getElementById('sberCheckProgress').style.display = 'none';
+        document.getElementById('sberCheckStatus').innerHTML = `
+            <div class="sber-status-idle">
+                <span>⏸️</span>
+                <p>Выберите логи во вкладке "Все логи" и нажмите "Проверить Sber"</p>
+            </div>
+        `;
+    }
+}
+
+function openScreenshot(src) {
+    // Open screenshot in new window/tab
+    const win = window.open('', '_blank');
+    win.document.write(`
+        <html>
+        <head><title>Screenshot</title></head>
+        <body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh">
+            <img src="${src}" style="max-width:100%;max-height:100vh">
+        </body>
+        </html>
+    `);
+}
+
 
 // Init
 document.addEventListener('DOMContentLoaded', async () => {

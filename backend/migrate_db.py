@@ -171,6 +171,36 @@ def migrate():
     except Exception as e:
         print(f"[-] Ошибка geelark_synced_phones: {e}")
     
+    # 10. Добавляем geelark_phone_id в logs
+    try:
+        cursor.execute("ALTER TABLE logs ADD COLUMN geelark_phone_id VARCHAR(100)")
+        print("[+] logs.geelark_phone_id добавлен")
+    except sqlite3.OperationalError as e:
+        if "duplicate column" in str(e).lower():
+            print("[=] logs.geelark_phone_id уже существует")
+        else:
+            print(f"[-] Ошибка logs.geelark_phone_id: {e}")
+    
+    # 11. Создаём таблицу check_results (результаты проверки Sberbank)
+    try:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS check_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                log_id INTEGER NOT NULL,
+                geelark_phone_id VARCHAR(100),
+                phone_name VARCHAR(255),
+                phone_serial VARCHAR(50),
+                status VARCHAR(20) NOT NULL,
+                error_message TEXT,
+                screenshot_url TEXT,
+                checked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (log_id) REFERENCES logs(id)
+            )
+        """)
+        print("[+] Таблица check_results создана")
+    except Exception as e:
+        print(f"[-] Ошибка check_results: {e}")
+    
     conn.commit()
     
     # Показываем статистику

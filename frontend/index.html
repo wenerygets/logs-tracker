@@ -82,6 +82,9 @@
                 <a href="#" class="nav-item" data-view="geelark" id="navGeelark">
                     <span>📱</span> Geelark
                 </a>
+                <a href="#" class="nav-item" data-view="sbercheck" id="navSberCheck">
+                    <span>💳</span> Проверка
+                </a>
             </nav>
 
             <div class="sidebar-footer">
@@ -221,6 +224,7 @@
                     <!-- Bulk Actions -->
                     <div class="bulk-actions" id="bulkActions" style="display:none">
                         <span id="selectedCount">0 выбрано</span>
+                        <button class="btn btn-sm btn-primary" onclick="startSberCheck()">💳 Проверить Sber</button>
                         <button class="btn btn-sm btn-secondary" onclick="bulkChangeTag()">🏷 Тег</button>
                         <button class="btn btn-sm btn-secondary" onclick="bulkArchive()">📦 Архив</button>
                         <button class="btn btn-sm btn-danger" onclick="bulkDelete()">🗑️ Удалить</button>
@@ -330,6 +334,44 @@
                         <div class="geelark-sync-info">
                             <div id="geelarkLastSync">—</div>
                             <div id="geelarkSyncStats"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Sber Check Results -->
+                <div class="view" id="sbercheckView">
+                    <div class="card sber-check-card">
+                        <div class="sber-check-header">
+                            <h3>💳 Проверка балансов Sberbank</h3>
+                            <div class="sber-check-actions">
+                                <button class="btn btn-secondary" onclick="refreshSberResults()">🔄 Обновить</button>
+                                <button class="btn btn-danger" onclick="clearSberResults()">🗑️ Очистить</button>
+                            </div>
+                        </div>
+                        
+                        <div class="sber-check-status" id="sberCheckStatus">
+                            <div class="sber-status-idle">
+                                <span>⏸️</span>
+                                <p>Выберите логи во вкладке "Все логи" и нажмите "Проверить Sber"</p>
+                            </div>
+                        </div>
+                        
+                        <div class="sber-check-progress" id="sberCheckProgress" style="display:none">
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="sberProgressFill"></div>
+                            </div>
+                            <div class="progress-text">
+                                <span id="sberProgressText">0 / 0</span>
+                                <span id="sberProgressCurrent"></span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card sber-results-card">
+                        <h3>📊 Результаты проверки</h3>
+                        <div class="sber-results-summary" id="sberResultsSummary"></div>
+                        <div class="sber-results-grid" id="sberResultsGrid">
+                            <div class="empty-state">Нет результатов</div>
                         </div>
                     </div>
                 </div>
