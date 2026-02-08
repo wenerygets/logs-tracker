@@ -93,7 +93,7 @@ class Worker(Base):
             "best_streak": self.best_streak,
             "achievements": self.achievements,
             "created_at": self.created_at.isoformat() if self.created_at else None,
-            "logs_count": len(self.logs) if self.logs else 0
+            "logs_count": len([l for l in self.logs if not l.is_archived]) if self.logs else 0
         }
 
 
