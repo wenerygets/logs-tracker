@@ -1875,6 +1875,14 @@ async def sber_start_phone(phone_id: str, settings) -> bool:
     return False
 
 
+async def sber_stop_phone(phone_id: str, settings) -> bool:
+    """Stop Geelark phone to save resources"""
+    result = await geelark_request("/phone/stop", {"ids": [phone_id]}, settings)
+    if result.get("code") == 0:
+        return result.get("data", {}).get("successAmount", 0) > 0
+    return False
+
+
 async def sber_get_android_version(phone_id: str, settings) -> int:
     """Get Android version"""
     result = await sber_shell_execute(phone_id, "getprop ro.build.version.release", settings)
@@ -1960,6 +1968,8 @@ async def process_single_phone_check(log: Log, phone: dict, settings, db: AsyncS
     if not pin_match:
         result["status"] = "skipped"
         result["error_message"] = "PIN не найден"
+        # Останавливаем профиль даже если PIN не найден
+        await sber_stop_phone(phone_id, settings)
         return result
     
     pin = pin_match.group(1)
@@ -2037,6 +2047,15 @@ async def process_single_phone_check(log: Log, phone: dict, settings, db: AsyncS
         
     except Exception as e:
         result["error_message"] = str(e)
+    
+    finally:
+        # Закрываем Sberbank и останавливаем профиль Geelark после проверки
+        try:
+            await sber_shell_execute(phone_id, "am force-stop ru.sberbankmobile", settings)
+            await asyncio.sleep(2)
+            await sber_stop_phone(phone_id, settings)
+        except Exception:
+            pass  # Не блокируем результат если остановка не удалась
     
     return result
 
